@@ -213,6 +213,98 @@ def test_large_chunking_llm():
     client.delete_collection("assignment_88888")
 
 
+# ── Phase 3+4 tests ──────────────────────────────────────────────────────────
+
+def test_material_extraction():
+    """Verify LLM extracts material references from assignment text (requires OPENAI_API_KEY)."""
+    if not USE_LLM:
+        print("[SKIP] test_material_extraction — run with --with-llm")
+        return
+
+    from agents.nodes.material_extractor import material_extractor
+
+    state = {
+        "assignment_text": (
+            "Assignment 4: Relational Database Design\n\n"
+            "Read Chapter 5 from the textbook before starting this assignment.\n"
+            "Refer to the Week 3 Normalization Slides for examples of 1NF, 2NF, and 3NF.\n"
+            "You may also find the ER Diagram Lab helpful for Part 2.\n"
+            "Use the SQL template provided in the Week 4 Resources folder.\n\n"
+            "Questions:\n"
+            "1. Normalize the given schema to 3NF (see Appendix B in the textbook)\n"
+            "2. Draw an ER diagram for the normalized schema\n"
+            "3. Write SQL CREATE TABLE statements"
+        ),
+    }
+
+    result = material_extractor(state)
+    refs = result.get("material_references", [])
+
+    assert len(refs) > 0, "Should have found material references"
+    ref_names = [r["name"].lower() for r in refs]
+    # Should find at least some of: Chapter 5, Week 3 Slides, ER Diagram Lab, SQL template
+    found_any = any(
+        "chapter" in n or "slide" in n or "lab" in n or "template" in n or "appendix" in n
+        for n in ref_names
+    )
+    assert found_any, f"Expected recognizable references, got: {ref_names}"
+
+    print(f"[PASS] Material extraction — found {len(refs)} references:")
+    for r in refs:
+        print(f"       - {r['name']} ({r['material_type']})")
+
+
+def test_material_extraction_empty():
+    """Assignment with no references returns empty list."""
+    if not USE_LLM:
+        print("[SKIP] test_material_extraction_empty — run with --with-llm")
+        return
+
+    from agents.nodes.material_extractor import material_extractor
+
+    state = {
+        "assignment_text": "Write a 500-word essay about your favorite hobby. No specific format required.",
+    }
+
+    result = material_extractor(state)
+    refs = result.get("material_references", [])
+    assert len(refs) == 0, f"Expected no references for self-contained assignment, got: {refs}"
+    print("[PASS] Material extraction empty — no references found (expected)")
+
+
+def test_fuzzy_matching():
+    """Test fuzzy matching logic in isolation (no Brightspace API needed)."""
+    from agents.nodes.material_fetcher import _fuzzy_match
+
+    references = [
+        {"name": "Chapter 5", "material_type": "chapter", "context_hint": "Read Chapter 5 from the textbook"},
+        {"name": "Week 3 Normalization Slides", "material_type": "slides", "context_hint": "Refer to the Week 3 Normalization Slides"},
+        {"name": "ER Diagram Lab", "material_type": "lab", "context_hint": "the ER Diagram Lab helpful for Part 2"},
+    ]
+
+    catalog = [
+        {"id": 1, "title": "Chapter 5 - Relational Model.pdf", "topic_type": 1, "url": None, "module_path": "Textbook Chapters"},
+        {"id": 2, "title": "Week 3 - Normalization Slides.pptx", "topic_type": 1, "url": None, "module_path": "Lectures"},
+        {"id": 3, "title": "Lab 3 - ER Diagrams.pdf", "topic_type": 1, "url": None, "module_path": "Labs"},
+        {"id": 4, "title": "Syllabus.pdf", "topic_type": 1, "url": None, "module_path": "Course Info"},
+        {"id": 5, "title": "Week 1 - Introduction.pptx", "topic_type": 1, "url": None, "module_path": "Lectures"},
+    ]
+
+    matched = _fuzzy_match(references, catalog)
+    matched_ids = {m["id"] for m in matched}
+
+    # Should match Chapter 5, Week 3 slides, and ER Lab — but NOT syllabus or Week 1
+    assert 1 in matched_ids, "Should match Chapter 5"
+    assert 2 in matched_ids, "Should match Week 3 slides"
+    assert 3 in matched_ids, "Should match ER Diagram Lab"
+    assert 4 not in matched_ids, "Should NOT match Syllabus"
+    assert 5 not in matched_ids, "Should NOT match Week 1"
+
+    print(f"[PASS] Fuzzy matching — matched {len(matched)}/3 expected items:")
+    for m in matched:
+        print(f"       - '{m['matched_ref']}' -> '{m['title']}' (score={m['match_score']})")
+
+
 if __name__ == "__main__":
     print("Testing LangGraph pipeline...\n")
     print("=== Phase 1 (no API key) ===")
@@ -224,4 +316,9 @@ if __name__ == "__main__":
     test_pdf_extraction()
     test_small_summary_llm()
     test_large_chunking_llm()
+    print()
+    print("=== Phase 3+4 ===")
+    test_material_extraction()
+    test_material_extraction_empty()
+    test_fuzzy_matching()
     print("\n=== All tests done ===")
