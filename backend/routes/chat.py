@@ -12,6 +12,7 @@ router = APIRouter(prefix="/api")
 
 class ChatRequest(BaseModel):
     prompt: str
+    mode: str = "neutral"
     course_id: int
     org_unit_id: int
     course_name: str = ""
@@ -44,6 +45,7 @@ async def chat_stream(body: ChatRequest, token: str = Depends(get_bs_token)):
 
     # Start with base state from request
     initial_state = {
+        "mode": body.mode,
         "user_prompt": body.prompt,
         "course_id": body.course_id,
         "org_unit_id": body.org_unit_id,

@@ -6,6 +6,7 @@ from langchain_core.documents import Document
 
 class GraphState(TypedDict, total=False):
     # ── Input ────────────────────────────────────────────────────────────────
+    mode: Literal["learning", "neutral", "lazy"]
     user_prompt: str
     chat_history: list[dict]          # [{"role": "user"|"assistant", "content": str}]
     assignment_pdf_path: str | None   # Local path to uploaded PDF

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../lib/api';
-import { FileText, Link as LinkIcon, Download, Clock, X, Terminal, Loader2, Send, Trash2, Paperclip, Pin, AlertTriangle, ExternalLink, Video } from 'lucide-react';
+import { FileText, Link as LinkIcon, Download, Clock, X, Terminal, Loader2, Send, Trash2, Paperclip, Pin, AlertTriangle, ExternalLink, Video, GraduationCap, Zap, Brain } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -37,6 +37,7 @@ export default function ChatArea({
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [mode, setMode] = useState<'learning' | 'neutral' | 'lazy'>('neutral');
   const [streamingSteps, setStreamingSteps] = useState<string[]>([]);
 
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
@@ -293,7 +294,8 @@ export default function ChatArea({
         selected_topic_ids: selectedTopics,
         uploaded_files: uploadedFiles,
         chat_history: messages.map(m => ({ role: m.role, content: m.content })),
-        session_id: sessionId
+        session_id: sessionId,
+        mode: mode
       };
 
       const token = localStorage.getItem('bs_token');
@@ -712,8 +714,37 @@ export default function ChatArea({
           />
 
           <div className="flex items-center justify-between px-4 pb-4 pt-1 gap-3">
-            {/* Left: file upload + selected topics */}
+            {/* Left: file upload + selected topics + mode toggle */}
             <div className="flex items-center gap-2 flex-1 overflow-x-auto custom-scrollbar min-w-0">
+              
+              {/* Mode Toggle */}
+              <div className="shrink-0 flex items-center bg-[#f4f3ec] dark:bg-[#2e303a] rounded-full p-1 cursor-pointer select-none shadow-inner border border-[#e5e4e7] dark:border-[#3f414d]">
+                <button
+                  type="button"
+                  onClick={(e) => { e.preventDefault(); setMode('learning'); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[13px] font-bold transition-all duration-200 ${mode === 'learning' ? 'bg-white dark:bg-[#1f2028] text-[#aa3bff] dark:text-[#c084fc] shadow-sm' : 'text-[#6b6375] dark:text-[#9ca3af] hover:text-[#aa3bff] dark:hover:text-[#c084fc]'}`}
+                >
+                  <GraduationCap size={15} strokeWidth={2.5} />
+                  Learning
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.preventDefault(); setMode('neutral'); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[13px] font-bold transition-all duration-200 ${mode === 'neutral' ? 'bg-white dark:bg-[#1f2028] text-[#aa3bff] dark:text-[#c084fc] shadow-sm' : 'text-[#6b6375] dark:text-[#9ca3af] hover:text-[#aa3bff] dark:hover:text-[#c084fc]'}`}
+                >
+                  <Brain size={15} strokeWidth={2.5} />
+                  Buddy
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.preventDefault(); setMode('lazy'); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[13px] font-bold transition-all duration-200 ${mode === 'lazy' ? 'bg-white dark:bg-[#1f2028] text-[#aa3bff] dark:text-[#c084fc] shadow-sm' : 'text-[#6b6375] dark:text-[#9ca3af] hover:text-[#aa3bff] dark:hover:text-[#c084fc]'}`}
+                >
+                  <Zap size={15} strokeWidth={2.5} />
+                  Lazy
+                </button>
+              </div>
+
               {/* Upload button */}
               <label className={`shrink-0 p-2 rounded-lg transition-colors cursor-pointer ${isUploading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#f4f3ec] dark:hover:bg-[#2e303a]'} text-[#6b6375] dark:text-[#9ca3af]`} title="Upload a file">
                 {isUploading ? <Loader2 size={18} className="animate-spin" /> : <Paperclip size={18} strokeWidth={2.5} />}
