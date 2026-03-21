@@ -16,7 +16,7 @@ interface CourseWork {
   quizzes: Task[];
 }
 
-export default function TasksSidebar() {
+export default function TasksSidebar({ selectedTask, onTaskSelect }: { selectedTask?: any, onTaskSelect: (courseId: any, taskId: any, type: string) => void }) {
   const [work, setWork] = useState<CourseWork[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -92,14 +92,30 @@ export default function TasksSidebar() {
                 const timeOpts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' };
                 const dateStr = dateObj ? dateObj.toLocaleDateString('en-US', timeOpts) : 'No Due Date';
 
+                const isSelected = selectedTask?.task_id === task.id;
+
                 return (
-                  <div key={`${task.type}-${task.id}-${i}`} className="bg-white dark:bg-[#1f2028] p-5 rounded-2xl shadow-[0_4px_12px_rgba(0,0,0,0.03)] border border-[#e5e4e7] dark:border-[#2e303a] hover:border-[#aa3bff] dark:hover:border-[#c084fc] hover:-translate-y-0.5 transition-all cursor-pointer group">
+                  <div 
+                    key={`${task.type}-${task.id}-${i}`} 
+                    onClick={() => {
+                      if (isSelected) {
+                        onTaskSelect(null, null, '');
+                      } else {
+                        onTaskSelect(course.course_id, task.id, task.type);
+                      }
+                    }}
+                    className={`p-5 rounded-2xl shadow-[0_4px_12px_rgba(0,0,0,0.03)] border transition-all cursor-pointer group ${
+                      isSelected 
+                        ? 'bg-[#f4f3ec] dark:bg-[#2e303a] border-[#aa3bff] dark:border-[#c084fc] ring-1 ring-[#aa3bff] dark:ring-[#c084fc]' 
+                        : 'bg-white dark:bg-[#1f2028] border-[#e5e4e7] dark:border-[#2e303a] hover:border-[#aa3bff] dark:hover:border-[#c084fc] hover:-translate-y-0.5'
+                    }`}
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
                         <span className="text-[11px] font-bold uppercase tracking-widest text-[#aa3bff] dark:text-[#c084fc] mb-2 block opacity-90">
                           {task.type}
                         </span>
-                        <h4 className="text-[15px] font-bold text-[#08060d] dark:text-[#f3f4f6] leading-snug group-hover:text-[#aa3bff] dark:group-hover:text-[#c084fc] transition-colors">
+                        <h4 className="text-[15px] font-bold text-[#08060d] dark:text-[#f3f4f6] leading-snug group-hover:text-[#aa3bff] dark:group-hover:text-[#c084fc] transition-colors whitespace-normal">
                           {task.name}
                         </h4>
                       </div>
@@ -110,8 +126,8 @@ export default function TasksSidebar() {
                       soon ? 'text-amber-500 dark:text-amber-400' : 
                       'text-[#6b6375] dark:text-[#9ca3af]'
                     }`}>
-                      <Clock size={14} className="mr-2" strokeWidth={2.5} />
-                      {overdue ? 'OVERDUE — ' : ''}{dateStr}
+                      <Clock size={14} className="mr-2 shrink-0" strokeWidth={2.5} />
+                      <span className="truncate">{overdue ? 'OVERDUE — ' : ''}{dateStr}</span>
                     </div>
                   </div>
                 );

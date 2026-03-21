@@ -150,6 +150,50 @@ async def get_dashboard_work(token: str = Depends(get_bs_token)):
     return result
 
 
+# ── GET /api/assignments/{org_unit_id}/{folder_id} ────────────────────────────
+
+@router.get("/assignments/{org_unit_id}/{folder_id}")
+async def get_assignment_detail(org_unit_id: int, folder_id: int, token: str = Depends(get_bs_token)):
+    async with _bs_client(token) as c:
+        resp = await c.get(f"/d2l/api/le/{LE_VER}/{org_unit_id}/dropbox/folders/{folder_id}")
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail="Failed to fetch assignment detail")
+        folder = resp.json()
+
+        instructions = folder.get("CustomInstructions") or {}
+        attachments = [
+            {
+                "file_id": a.get("FileId"),
+                "file_name": a.get("FileName"),
+                "size": a.get("Size"),
+            }
+            for a in (folder.get("Attachments") or [])
+        ]
+        link_attachments = [
+            {
+                "link_id": l.get("LinkId"),
+                "link_name": l.get("LinkName"),
+                "href": l.get("Href"),
+            }
+            for l in (folder.get("LinkAttachments") or [])
+        ]
+
+    return {
+        "id": folder.get("Id"),
+        "name": folder.get("Name"),
+        "instructions_html": instructions.get("Html", ""),
+        "instructions_text": instructions.get("Text", ""),
+        "due_date": folder.get("DueDate"),
+        "start_date": (folder.get("Availability") or {}).get("StartDate"),
+        "end_date": (folder.get("Availability") or {}).get("EndDate"),
+        "attachments": attachments,
+        "link_attachments": link_attachments,
+        "score_denominator": (folder.get("Assessment") or {}).get("ScoreDenominator"),
+        "submission_type": folder.get("SubmissionType"),
+        "is_hidden": folder.get("IsHidden"),
+    }
+
+
 # ── GET /api/courses/{org_unit_id}/modules ─────────────────────────────────────
 
 @router.get("/courses/{org_unit_id}/modules")

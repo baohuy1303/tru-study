@@ -3,14 +3,13 @@ import { ChevronRight, ChevronDown, Folder, FileText, BookOpen } from 'lucide-re
 import api from '../lib/api';
 
 // TreeNode component for recursive rendering
-function TreeNode({ node, orgUnitId, level = 0 }) {
+function TreeNode({ node, orgUnitId, level = 0 }: { node: any, orgUnitId?: any, level?: number }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [children, setChildren] = useState(null);
+  const [children, setChildren] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
 
   // Type: 0 = Module, 1 = Topic
   const isModule = level === 0 || node.type === 0;
-  const isFile = !isModule && node.topic_type === 1;
 
   const handleToggle = async () => {
     if (!isModule) return;
@@ -80,8 +79,8 @@ function TreeNode({ node, orgUnitId, level = 0 }) {
   );
 }
 
-export default function Sidebar() {
-  const [courses, setCourses] = useState([]);
+export default function Sidebar({ selectedTask }: { selectedTask?: any }) {
+  const [courses, setCourses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -108,13 +107,19 @@ export default function Sidebar() {
     );
   }
 
+  const displayCourses = selectedTask 
+    ? courses.filter((c: any) => c.id === selectedTask.org_unit_id)
+    : courses;
+
   return (
     <div className="flex flex-col pb-8">
-      <h3 className="text-xs uppercase tracking-widest font-bold mb-3 ml-3 text-[#6b6375] dark:text-[#9ca3af]">Fall 2026 Enrollments</h3>
-      {courses.map(course => (
+      <h3 className="text-xs uppercase tracking-widest font-bold mb-3 ml-3 text-[#6b6375] dark:text-[#9ca3af]">
+        {selectedTask ? 'Selected Course' : 'Fall 2026 Enrollments'}
+      </h3>
+      {displayCourses.map((course: any) => (
         <TreeNode key={course.id} node={course} level={0} />
       ))}
-      {courses.length === 0 && (
+      {displayCourses.length === 0 && (
         <p className="text-sm font-medium text-[#6b6375] dark:text-[#9ca3af] ml-3 mt-2">No active courses found.</p>
       )}
     </div>
