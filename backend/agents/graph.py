@@ -23,7 +23,7 @@ from agents.nodes.responder import responder
 
 load_dotenv()
 
-TOKEN_THRESHOLD = int(os.getenv("TOKEN_THRESHOLD", "4000"))
+TOKEN_THRESHOLD = int(os.getenv("TOKEN_THRESHOLD", "60000"))
 
 
 def _token_gate(state: GraphState) -> str:

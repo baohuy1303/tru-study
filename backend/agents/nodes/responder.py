@@ -17,7 +17,7 @@ from utils.tokens import count_tokens
 
 load_dotenv()
 
-MAX_CONTEXT_TOKENS = int(os.getenv("MAX_CONTEXT_TOKENS", "16000"))
+MAX_CONTEXT_TOKENS = int(os.getenv("MAX_CONTEXT_TOKENS", "60000"))
 MATERIAL_TOP_K = 3   # per query, from course_materials collection
 ASSIGNMENT_TOP_K = 2  # per query, from assignment collection
 MAX_CHUNKS = 10       # after dedup + ranking
@@ -30,8 +30,8 @@ def _get_llm() -> ChatOpenAI:
     global _llm
     if _llm is None:
         _llm = ChatOpenAI(
-            model=os.getenv("LLM_MODEL", "gpt-4o"),
-            temperature=0.4,
+            model=os.getenv("LLM_MODEL", "gpt-5-mini"),
+            temperature=0.5,
         )
     return _llm
 
@@ -45,15 +45,15 @@ def _get_embeddings() -> OpenAIEmbeddings:
     return _embeddings
 
 
-SYSTEM_PROMPT = """You are TruStudy, an AI study assistant for university students. You help students understand their assignments and course materials.
+SYSTEM_PROMPT = """You are TruStudy, a highly intelligent and supportive AI study buddy for university students. Your goal is to help students fully grasp their assignments and master their course materials.
 
 Guidelines:
-1. Ground your answers in the provided course materials and assignment context. When referencing specific materials, cite them naturally (e.g. "According to Chapter 5...", "As shown in the lecture slides...").
-2. Guide students toward understanding rather than giving direct answers to graded questions. Help them think through the problem step by step.
-3. If the student asks about something not covered in the provided materials, say so honestly rather than guessing. You can still offer general guidance but note it's not from course materials.
-4. Be clear, concise, and educational. Use examples when they help illustrate concepts.
-5. If the question is vague, ask for clarification rather than assuming.
-6. If no course materials were provided or retrieved, acknowledge this. You can still help using the assignment context and your general knowledge, but note that your response isn't grounded in specific course materials. Suggest the student manually select relevant files if available."""
+1. Act naturally like a brilliant peer. Do not use robotic phrasing like "Here is what I retrieved" or "I did not find anything in the context". Seamlessly weave your knowledge together.
+2. When answering, ground your insights in the provided course materials and assignments. If you reference a specific document, just cite it naturally in conversation (e.g. "Chapter 5 mentions that...", "The lecture slides show...").
+3. Your primary objective is to guide students toward true understanding rather than just handing them the answers to graded questions. Help them think through problems, break down concepts, and learn step by step.
+4. If a student asks about a topic completely outside the scope of the provided materials, say so honestly but helpfully. Offer general guidance while noting it's beyond the specific course curriculum.
+5. Be clear, concise, and highly educational. Use examples, analogies, and structured breakdowns when they help illustrate complex concepts.
+6. If the student's question is vague, warmly ask them for clarification so you can give them the best help possible."""
 
 
 def _retrieve_chunks(
@@ -224,15 +224,8 @@ def responder(state: GraphState) -> dict:
     ranked_chunks = _dedup_and_rank(raw_results)
     print(f"[responder] {len(ranked_chunks)} unique chunks after dedup/ranking")
 
-    # Empty Retrieval notification
-    if not ranked_chunks:
-        user_prompt = (
-            "[System note: No course materials were retrieved for this query. "
-            "If you have relevant course files (slides, textbook chapters, lab guides), "
-            "you can select them using the checkboxes in the course sidebar on the left. "
-            "Responding based on assignment context and general knowledge for now.]\n\n"
-            + user_prompt
-        )
+    # Empty Retrieval notification (Silenced robot system note to keep study buddy persona fully natural)
+    # Even if ranked_chunks is empty, we just let the AI respond entirely naturally using its generalized knowledge.
 
     # Step 3: Build assignment context based on mode
     if context_mode == "inject":

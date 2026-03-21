@@ -31,6 +31,8 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   }, []);
 
   const handleTaskSelect = (course_id: any, task_id: any, type: string, course_name?: string) => {
+    setCheckedTopicsMap(new Map());
+    
     if (!course_id) {
       setSelectedTask(null);
       return;
@@ -138,7 +140,10 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
         )}
         <ChatArea
           selectedTask={selectedTask}
-          onClearTask={() => setSelectedTask(null)}
+          onClearTask={() => {
+            setCheckedTopicsMap(new Map());
+            setSelectedTask(null);
+          }}
           selectedTopics={selectedTopicsPayload}
           resetKey={resetKey}
           onLinkTopicReplaced={handleLinkTopicReplaced}

@@ -37,7 +37,7 @@ export default function ChatArea({
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [currentAiStep, setCurrentAiStep] = useState<string | null>(null);
+  const [streamingSteps, setStreamingSteps] = useState<string[]>([]);
 
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -84,10 +84,23 @@ export default function ChatArea({
     }
   }, [resetKey]);
 
+  const [loadedTaskId, setLoadedTaskId] = useState<any>(null);
+  const currentSessionIdRef = useRef(sessionId);
+  
+  useEffect(() => {
+    currentSessionIdRef.current = sessionId;
+  }, [sessionId]);
+
   // Load persistence
   useEffect(() => {
-    if (selectedTask?.task_id) {
-      const saved = localStorage.getItem(`chat_${selectedTask.task_id}`);
+    const activeSessionId = currentSessionIdRef.current;
+    if (activeSessionId?.startsWith("freeform_")) {
+      api.delete(`/sessions/id/${activeSessionId}`).catch(e => console.error("Freeform cleanup failed", e));
+    }
+
+    const taskId = selectedTask?.task_id || null;
+    if (taskId) {
+      const saved = localStorage.getItem(`chat_${taskId}`);
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
@@ -105,14 +118,15 @@ export default function ChatArea({
       setMessages([]);
       setSessionId(null);
     }
-  }, [selectedTask?.task_id]);
+    setLoadedTaskId(taskId);
+  }, [selectedTask?.task_id, selectedTask?.org_unit_id, selectedTask?.type]);
 
   // Save persistence
   useEffect(() => {
-    if (selectedTask?.task_id && messages.length > 0) {
+    if (selectedTask?.task_id && loadedTaskId === selectedTask.task_id && messages.length > 0) {
       localStorage.setItem(`chat_${selectedTask.task_id}`, JSON.stringify({ messages, sessionId }));
     }
-  }, [messages, sessionId, selectedTask?.task_id]);
+  }, [messages, sessionId, selectedTask?.task_id, loadedTaskId]);
 
   useEffect(() => {
     if (!selectedTask || selectedTask.type !== 'assignment') {
@@ -144,6 +158,9 @@ export default function ChatArea({
       }
       setMessages([]);
       setSessionId(null);
+      setUploadedFiles([]);
+      setInaccessibleTopics([]);
+      setTooLongVideos([]);
       if (selectedTask) {
         localStorage.removeItem(`chat_${selectedTask.task_id}`);
       }
@@ -258,6 +275,7 @@ export default function ChatArea({
     const newMessages = [...messages, { role: 'user' as const, content: userMsg }];
     setMessages(newMessages);
     setIsTyping(true);
+    setStreamingSteps([]);
 
     try {
       const payload = {
@@ -312,7 +330,7 @@ export default function ChatArea({
                 try {
                   const data = JSON.parse(dataStr);
                   if (data.type === 'progress') {
-                    setCurrentAiStep(data.node);
+                    setStreamingSteps(prev => [...prev, data.node]);
                   } else if (data.type === 'result') {
                     setSessionId(data.session_id);
                     setMessages(prev => [...prev, {
@@ -342,7 +360,7 @@ export default function ChatArea({
       setMessages(prev => [...prev, { role: 'assistant', content: "Sorry, I encountered an error processing your request." }]);
     } finally {
       setIsTyping(false);
-      setCurrentAiStep(null);
+      setStreamingSteps([]);
     }
   };
 
@@ -569,32 +587,25 @@ export default function ChatArea({
                   </div>
                 )}
               </div>
-
               {/* Pipeline Log visualization (only for assistant messages) */}
               {msg.role === 'assistant' && msg.pipelineLog && msg.pipelineLog.length > 0 && (
-                <div className="mt-3 bg-[#1e1e1e] text-[#d4d4d4] rounded-lg p-3 text-[11px] font-mono w-full md:max-w-[75%] border border-[#333] shadow-inner overflow-hidden flex flex-col gap-1.5 opacity-90 transition-opacity hover:opacity-100">
-                  <div className="flex items-center gap-2 mb-1 text-[#4ec9b0] font-bold pb-1.5 border-b border-[#333]">
-                    <Terminal size={12} />
-                    <span>Pipeline Execution Log</span>
-                  </div>
-                  {msg.pipelineLog.map((log: any, idx) => (
-                    <div key={idx} className="flex flex-col gap-0.5 ml-1">
-                      <div className="flex justify-between items-center group">
-                        <div className="flex items-center gap-1.5 text-[#ce9178]">
-                          <span className={`${
-                            log.status === 'done' ? 'text-green-500' :
-                            log.status === 'error' ? 'text-red-500' :
-                            log.status === 'warning' ? 'text-yellow-500' : 'text-gray-500'
-                          }`}>[{log.status}]</span>
-                          <span className="font-semibold text-[#9cdcfe]">{log.node}</span>
-                        </div>
-                        <span className="text-[#608b4e]">{log.duration_s?.toFixed(2)}s</span>
+                <div className="mt-2 flex items-center gap-2 px-1 text-[10px] text-[#6b6375] dark:text-[#9ca3af] opacity-50 hover:opacity-100 transition-opacity select-none group">
+                  <span className="font-bold uppercase tracking-widest flex items-center gap-1">
+                    <Terminal size={10} className="opacity-70" />
+                    Trace
+                  </span>
+                  <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap scrollbar-none">
+                    {msg.pipelineLog!.map((log: any, idx: number) => (
+                      <div key={idx} className="flex items-center text-[10px]">
+                        {log.status === 'done' && <span className="text-emerald-500 font-bold mr-0.5 animate-in fade-in zoom-in-50 duration-500">✓</span>}
+                        {log.status === 'error' && <span className="text-rose-500 font-bold mr-0.5">✗</span>}
+                        <span className={`capitalize ${log.status === 'error' ? 'text-rose-500 font-semibold' : 'text-[#6b6375] dark:text-[#9ca3af]'}`}>
+                          {log.node.replace(/_/g, ' ')}
+                        </span>
+                        {idx < msg.pipelineLog!.length - 1 && <span className="mx-1.5 opacity-20 text-[9px]">/</span>}
                       </div>
-                      {log.detail && (
-                        <span className="text-gray-400 pl-[4.5rem] truncate group-hover:whitespace-normal group-hover:break-words">{log.detail}</span>
-                      )}
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -602,11 +613,27 @@ export default function ChatArea({
 
           {isTyping && (
             <div className="flex justify-start">
-              <div className="bg-white dark:bg-[#1f2028] border border-[#e5e4e7] dark:border-[#2e303a] rounded-2xl rounded-bl-sm p-4 px-5 shadow-sm flex items-center gap-3">
-                <Loader2 className="animate-spin text-[#aa3bff] dark:text-[#c084fc]" size={20} />
-                <span className="text-sm font-semibold text-[#6b6375] dark:text-[#9ca3af]">
-                  {currentAiStep ? `TruStudy: ${currentAiStep}...` : 'TruStudy is thinking...'}
-                </span>
+              <div className="bg-white dark:bg-[#1f2028] border border-[#e5e4e7] dark:border-[#2e303a] rounded-2xl rounded-bl-sm p-5 shadow-sm min-w-[280px] flex flex-col gap-3 transition-all animate-in fade-in slide-in-from-left-4 duration-500">
+                {streamingSteps.length === 0 && (
+                  <div className="flex items-center gap-3">
+                    <Loader2 className="animate-spin text-[#aa3bff]" size={18} />
+                    <span className="text-sm font-bold text-[#6b6375] dark:text-[#9ca3af]">TruStudy is thinking...</span>
+                  </div>
+                )}
+                {streamingSteps.map((step, idx) => (
+                  <div key={idx} className="flex items-center gap-3 animate-in fade-in slide-in-from-left-2 duration-300">
+                    {idx === streamingSteps.length - 1 ? (
+                      <Loader2 className="animate-spin text-[#aa3bff]" size={14} />
+                    ) : (
+                      <div className="w-3.5 h-3.5 rounded-full bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center">
+                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      </div>
+                    )}
+                    <span className={`text-[13px] font-semibold capitalize ${idx === streamingSteps.length - 1 ? 'text-[#08060d] dark:text-[#f3f4f6]' : 'text-[#6b6375] dark:text-[#9ca3af] opacity-60'}`}>
+                      {step.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
           )}
