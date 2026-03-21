@@ -2,7 +2,7 @@ import Sidebar from './Sidebar';
 import TasksSidebar from './TasksSidebar';
 import ChatArea from './ChatArea';
 
-export default function Dashboard({ onLogout }) {
+export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   return (
     <div className="flex h-screen bg-[#f4f3ec] text-[#08060d] dark:bg-[#16171d] dark:text-[#f3f4f6] overflow-hidden text-left font-sans max-w-none w-full border-none">
       

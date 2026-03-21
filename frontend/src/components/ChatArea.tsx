@@ -1,6 +1,6 @@
 export default function ChatArea() {
   return (
-    <div className="flex-1 flex flex-col items-center justify-end p-8 w-full max-w-4xl mx-auto h-full space-y-8 min-h-0">
+    <div className="flex-1 flex flex-col items-center justify-end p-8 w-full max-w-8xl mx-auto h-full space-y-8 min-h-0">
       <div className="flex-1 w-full flex flex-col justify-center items-center text-center opacity-80 shrink-0">
         <h2 className="text-4xl font-semibold text-[#08060d] dark:text-[#f3f4f6] tracking-tight m-0 mb-3">
           What do you want to learn today?
