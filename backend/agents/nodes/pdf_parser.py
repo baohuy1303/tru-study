@@ -8,11 +8,14 @@ Extracts text from:
 Counts tokens for downstream routing.
 """
 
+import time
+
 import httpx
 
 from agents.state import GraphState
 from utils.tokens import count_tokens
-from utils.pdf import extract_text_from_pdf, extract_text_from_bytes
+from utils.pdf import extract_text_from_pdf, extract_text_from_bytes, extract_text_with_ocr
+from utils.pipeline_log import log_step
 
 BS_BASE = "https://learn.truman.edu"
 LE_VER = "1.92"
@@ -23,8 +26,11 @@ def pdf_parser(state: GraphState) -> dict:
     # Skip if pipeline state is already cached (multi-turn)
     if state.get("assignment_summary") and state.get("assignment_token_count") is not None:
         print("[pdf_parser] Skipping -- cached state available")
-        return {}
+        return {
+            "pipeline_log": log_step(state, "pdf_parser", "skipped", "cached state available"),
+        }
 
+    t0 = time.time()
     parts = []
 
     # Source 1: Brightspace instructions text (already provided by frontend)
@@ -76,9 +82,26 @@ def pdf_parser(state: GraphState) -> dict:
 
     # Combine all sources
     full_text = "\n\n".join(parts) if parts else ""
+
+    # If no text extracted but PDFs were provided, try OCR fallback then warn
+    if not full_text and (attachments or pdf_path):
+        if pdf_path:
+            ocr_text = extract_text_with_ocr(pdf_path)
+            if ocr_text:
+                full_text = ocr_text
+
+        if not full_text:
+            full_text = (
+                "[Warning] The uploaded PDF(s) appear to be image-based "
+                "or could not be parsed. Please try uploading a text-based PDF."
+            )
+
     token_count = count_tokens(full_text) if full_text else 0
+    elapsed = time.time() - t0
+    print(f"[pdf_parser] Done in {elapsed:.1f}s -- {token_count} tokens")
 
     return {
         "assignment_text": full_text,
         "assignment_token_count": token_count,
+        "pipeline_log": log_step(state, "pdf_parser", "done", f"{token_count} tokens extracted", elapsed),
     }

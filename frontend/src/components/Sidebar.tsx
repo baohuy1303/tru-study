@@ -3,16 +3,36 @@ import { ChevronRight, ChevronDown, Folder, FileText, BookOpen } from 'lucide-re
 import api from '../lib/api';
 
 // TreeNode component for recursive rendering
-function TreeNode({ node, orgUnitId, level = 0 }: { node: any, orgUnitId?: any, level?: number }) {
+function TreeNode({ 
+  node, 
+  orgUnitId, 
+  level = 0,
+  checkedTopics,
+  onTopicToggle
+}: { 
+  node: any, 
+  orgUnitId?: any, 
+  level?: number,
+  checkedTopics?: Set<number>,
+  onTopicToggle?: (topic: any, checked: boolean) => void
+}) {
   const [isOpen, setIsOpen] = useState(false);
   const [children, setChildren] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
 
   // Type: 0 = Module, 1 = Topic
   const isModule = level === 0 || node.type === 0;
+  const isSelectableTopic = !isModule && node.topic_type === 1;
+  const isChecked = checkedTopics ? checkedTopics.has(node.id) : false;
 
-  const handleToggle = async () => {
-    if (!isModule) return;
+  const handleToggle = async (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!isModule) {
+      if (isSelectableTopic && onTopicToggle) {
+        onTopicToggle(node, !isChecked);
+      }
+      return;
+    }
     
     setIsOpen(!isOpen);
     
@@ -48,6 +68,13 @@ function TreeNode({ node, orgUnitId, level = 0 }: { node: any, orgUnitId?: any, 
         <div className="w-5 h-5 flex items-center justify-center mr-1.5 mt-0.5 text-[#6b6375] dark:text-[#9ca3af] group-hover:text-[#aa3bff] dark:group-hover:text-[#c084fc] transition-colors shrink-0">
           {isModule ? (
             isOpen ? <ChevronDown size={18} /> : <ChevronRight size={18} />
+          ) : isSelectableTopic ? (
+            <input 
+              type="checkbox"
+              checked={isChecked}
+              onChange={() => {}} // dummy onChange since event is handled by onClick
+              className="w-3.5 h-3.5 rounded text-[#aa3bff] focus:ring-[#aa3bff] border-[#e5e4e7] dark:border-[#3f414d] dark:bg-[#1f2028]"
+            />
           ) : (
             <span className="w-4 h-4" /> // spacer
           )}
@@ -68,7 +95,14 @@ function TreeNode({ node, orgUnitId, level = 0 }: { node: any, orgUnitId?: any, 
              <div className="py-2.5 text-xs font-semibold uppercase tracking-wider text-[#6b6375] dark:text-[#9ca3af]" style={{ paddingLeft: `${padLeft + 42}px` }}>Loading...</div>
           )}
           {children && children.map(child => (
-            <TreeNode key={child.id} node={child} orgUnitId={orgUnitId || node.id} level={level + 1} />
+            <TreeNode 
+              key={child.id} 
+              node={child} 
+              orgUnitId={orgUnitId || node.id} 
+              level={level + 1}
+              checkedTopics={checkedTopics}
+              onTopicToggle={onTopicToggle}
+            />
           ))}
           {children && children.length === 0 && (
              <div className="py-2.5 text-xs font-semibold uppercase tracking-wider text-[#6b6375] dark:text-[#9ca3af]" style={{ paddingLeft: `${padLeft + 42}px` }}>Empty</div>
@@ -79,7 +113,15 @@ function TreeNode({ node, orgUnitId, level = 0 }: { node: any, orgUnitId?: any, 
   );
 }
 
-export default function Sidebar({ selectedTask }: { selectedTask?: any }) {
+export default function Sidebar({ 
+  selectedTask,
+  checkedTopics,
+  onTopicToggle
+}: { 
+  selectedTask?: any,
+  checkedTopics?: Set<number>,
+  onTopicToggle?: (topic: any, checked: boolean) => void
+}) {
   const [courses, setCourses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -117,7 +159,13 @@ export default function Sidebar({ selectedTask }: { selectedTask?: any }) {
         {selectedTask ? 'Selected Course' : 'Fall 2026 Enrollments'}
       </h3>
       {displayCourses.map((course: any) => (
-        <TreeNode key={course.id} node={course} level={0} />
+        <TreeNode 
+          key={course.id} 
+          node={course} 
+          level={0} 
+          checkedTopics={checkedTopics}
+          onTopicToggle={onTopicToggle}
+        />
       ))}
       {displayCourses.length === 0 && (
         <p className="text-sm font-medium text-[#6b6375] dark:text-[#9ca3af] ml-3 mt-2">No active courses found.</p>

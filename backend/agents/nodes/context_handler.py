@@ -73,29 +73,41 @@ def _generate_summary(text: str, course_name: str, detailed: bool) -> str:
 
 def handle_small_context(state: GraphState) -> dict:
     """For assignments under the token threshold — inject full text, generate exhaustive summary."""
+    import time
+    from utils.pipeline_log import log_step
+    
+    t0 = time.time()
     # Skip if summary already cached (multi-turn)
     if state.get("assignment_summary"):
         print("[context_handler] Skipping small handler -- summary already cached")
-        return {}
+        return {"pipeline_log": log_step(state, "context_handler_small", "skipped", "summary already cached", time.time() - t0)}
 
     text = state.get("assignment_text", "")
     course_name = state.get("course_name", "Unknown Course")
 
     summary = _generate_summary(text, course_name, detailed=True)
-
+    
+    elapsed = time.time() - t0
+    print(f"[context_handler] Small handler done in {elapsed:.1f}s")
+    
     return {
         "context_mode": "inject",
         "assignment_summary": summary,
         "assignment_embedded": False,
+        "pipeline_log": log_step(state, "context_handler_small", "done", "generated exhaustive summary", elapsed)
     }
 
 
 def handle_large_context(state: GraphState) -> dict:
     """For assignments over the token threshold — chunk, embed into Chroma, generate concise overview."""
+    import time
+    from utils.pipeline_log import log_step
+    
+    t0 = time.time()
     # Skip if summary already cached (multi-turn)
     if state.get("assignment_summary"):
         print("[context_handler] Skipping large handler -- summary already cached")
-        return {}
+        return {"pipeline_log": log_step(state, "context_handler_large", "skipped", "summary already cached", time.time() - t0)}
 
     text = state.get("assignment_text", "")
     course_name = state.get("course_name", "Unknown Course")
@@ -126,6 +138,7 @@ def handle_large_context(state: GraphState) -> dict:
             print(f"[context_handler] Embedded {len(chunks)} chunks for assignment {assignment_id}")
         except Exception as e:
             print(f"[context_handler] Failed to embed assignment chunks: {e}")
+            log_step(state, "context_handler_large", "warning", f"failed to embed chunks: {e}", 0)
 
     # Generate concise summary from first ~3000 tokens
     truncated = text
@@ -134,9 +147,13 @@ def handle_large_context(state: GraphState) -> dict:
         truncated = text[:12000]
 
     summary = _generate_summary(truncated, course_name, detailed=False)
-
+    
+    elapsed = time.time() - t0
+    print(f"[context_handler] Large handler done in {elapsed:.1f}s")
+    
     return {
         "context_mode": "rag",
         "assignment_summary": summary,
         "assignment_embedded": embedded,
+        "pipeline_log": log_step(state, "context_handler_large", "done", f"embedded {len(chunks)} chunks & generated concise overview", elapsed)
     }

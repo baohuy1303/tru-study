@@ -52,7 +52,8 @@ Guidelines:
 2. Guide students toward understanding rather than giving direct answers to graded questions. Help them think through the problem step by step.
 3. If the student asks about something not covered in the provided materials, say so honestly rather than guessing. You can still offer general guidance but note it's not from course materials.
 4. Be clear, concise, and educational. Use examples when they help illustrate concepts.
-5. If the question is vague, ask for clarification rather than assuming."""
+5. If the question is vague, ask for clarification rather than assuming.
+6. If no course materials were provided or retrieved, acknowledge this. You can still help using the assignment context and your general knowledge, but note that your response isn't grounded in specific course materials. Suggest the student manually select relevant files if available."""
 
 
 def _retrieve_chunks(
@@ -201,6 +202,11 @@ def _build_messages(
 
 def responder(state: GraphState) -> dict:
     """Retrieve relevant chunks and generate final response."""
+    import time
+    from utils.pipeline_log import log_step
+    
+    t0 = time.time()
+    
     queries = state.get("retrieval_queries", [])
     course_id = state.get("course_id")
     assignment_id = state.get("assignment_id")
@@ -218,6 +224,10 @@ def responder(state: GraphState) -> dict:
     ranked_chunks = _dedup_and_rank(raw_results)
     print(f"[responder] {len(ranked_chunks)} unique chunks after dedup/ranking")
 
+    # Empty Retrieval notification
+    if not ranked_chunks:
+        user_prompt = "[Note: No course materials were retrieved for this query. Responding based on assignment context and general knowledge.]\n\n" + user_prompt
+
     # Step 3: Build assignment context based on mode
     if context_mode == "inject":
         # Small assignment — use full text
@@ -225,6 +235,11 @@ def responder(state: GraphState) -> dict:
     else:
         # Large assignment (RAG) — use summary only, chunks handle the detail
         assignment_context = assignment_summary
+
+    # Safeguard: if assignment_context alone exceeds the budget roughly, fall back to summary/truncation
+    if assignment_context and count_tokens(assignment_context) > MAX_CONTEXT_TOKENS - 2000:
+        print("[responder] Warning: assignment_context too large for budget. Falling back to summary/truncation.")
+        assignment_context = assignment_summary or assignment_context[:12000]
 
     # Step 4: Assemble messages with token budget
     messages = _build_messages(
@@ -254,7 +269,11 @@ def responder(state: GraphState) -> dict:
         for chunk in ranked_chunks
     ]
 
+    elapsed = time.time() - t0
+    print(f"[responder] Done in {elapsed:.1f}s")
+
     return {
         "retrieved_docs": retrieved_docs,
         "response": response_text,
+        "pipeline_log": log_step(state, "responder", "done", f"retrieved {len(ranked_chunks)} chunks", elapsed)
     }

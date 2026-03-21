@@ -2,7 +2,15 @@ import { useState, useEffect } from 'react';
 import api from '../lib/api';
 import { FileText, Link as LinkIcon, Download, Clock, X } from 'lucide-react';
 
-export default function ChatArea({ selectedTask, onClearTask }: { selectedTask: any, onClearTask: () => void }) {
+export default function ChatArea({ 
+  selectedTask, 
+  onClearTask,
+  selectedTopics = []
+}: { 
+  selectedTask: any, 
+  onClearTask: () => void,
+  selectedTopics?: any[]
+}) {
   const [taskDetails, setTaskDetails] = useState<any>(null);
   const [loading, setLoading] = useState(false);
 

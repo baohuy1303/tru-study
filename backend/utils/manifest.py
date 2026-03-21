@@ -26,5 +26,8 @@ def load_manifest(course_id: int) -> dict:
 def save_manifest(course_id: int, data: dict) -> None:
     """Save the materials manifest for a course."""
     path = _manifest_path(course_id)
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
+    try:
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+    except (IOError, OSError) as e:
+        print(f"[manifest] Failed to save manifest for course {course_id}: {e}")

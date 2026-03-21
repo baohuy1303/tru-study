@@ -126,15 +126,20 @@ def _download_and_extract(topic_id: int, org_unit_id: int, bs_token: str) -> tup
 
 def material_fetcher(state: GraphState) -> dict:
     """Fetch, match, download, and embed course materials."""
+    import time
+    from utils.pipeline_log import log_step
+    
+    t0 = time.time()
+
     # Skip if materials already cached (multi-turn)
     if state.get("embedded_materials") is not None:
         print("[material_fetcher] Skipping -- materials already cached")
-        return {}
+        return {"pipeline_log": log_step(state, "material_fetcher", "skipped", "materials already cached", time.time() - t0)}
 
     references = state.get("material_references") or []
     if not references:
         print("[material_fetcher] No material references to fetch")
-        return {"embedded_materials": [], "materials_metadata": {}}
+        return {"embedded_materials": [], "materials_metadata": {}, "pipeline_log": log_step(state, "material_fetcher", "done", "no references", time.time() - t0)}
 
     org_unit_id = state.get("org_unit_id")
     bs_token = state.get("bs_token", "")
@@ -142,121 +147,150 @@ def material_fetcher(state: GraphState) -> dict:
 
     if not org_unit_id or not bs_token:
         print("[material_fetcher] Missing org_unit_id or bs_token, skipping")
-        return {"embedded_materials": [], "materials_metadata": {}}
+        return {"embedded_materials": [], "materials_metadata": {}, "pipeline_log": log_step(state, "material_fetcher", "error", "missing org_unit_id or token", time.time() - t0)}
 
-    # Step 1: Get content catalog from Brightspace
-    print(f"[material_fetcher] Walking content tree for org_unit {org_unit_id}...")
-    catalog = get_content_catalog(org_unit_id, bs_token)
-    if not catalog:
-        print("[material_fetcher] Empty content catalog")
-        return {"embedded_materials": [], "materials_metadata": {}}
+    try:
+        # Step 1: Get content catalog from Brightspace
+        print(f"[material_fetcher] Walking content tree for org_unit {org_unit_id}...")
+        catalog = get_content_catalog(org_unit_id, bs_token)
+        if not catalog:
+            print("[material_fetcher] Empty content catalog -- token may be expired or user lacks access.")
+            return {"embedded_materials": [], "materials_metadata": {}, "pipeline_log": log_step(state, "material_fetcher", "warning", "api returned no content", time.time() - t0)}
 
-    # Filter to downloadable files only (TopicType 1)
-    downloadable = [item for item in catalog if item.get("topic_type") == 1]
-    print(f"[material_fetcher] {len(downloadable)} downloadable files in catalog")
+        # Filter to downloadable files only (TopicType 1)
+        downloadable = [item for item in catalog if item.get("topic_type") == 1]
+        print(f"[material_fetcher] {len(downloadable)} downloadable files in catalog")
 
-    # Step 2: Fuzzy match references against catalog
-    print(f"[material_fetcher] Fuzzy matching {len(references)} references...")
-    matched = _fuzzy_match(references, downloadable)
-    if not matched:
-        print("[material_fetcher] No materials matched above threshold")
-        return {"embedded_materials": [], "materials_metadata": {}}
+        # Step 2: Fuzzy match references against catalog
+        print(f"[material_fetcher] Fuzzy matching {len(references)} references...")
+        matched = _fuzzy_match(references, downloadable)
+        seen_ids = {m["id"] for m in matched}
+        
+        # Process user-selected topics (manual picks)
+        user_topics = state.get("user_selected_topics") or []
+        for topic in user_topics:
+            topic_id = topic.get("id")
+            title = topic.get("title", f"topic_{topic_id}")
+            if topic_id and topic_id not in seen_ids:
+                # Add to matched list as if fuzzy matched with score=100
+                matched.append({
+                    "id": topic_id, "title": title, "topic_type": 1,
+                    "url": None, "module_path": "user-selected",
+                    "match_score": 100, "matched_ref": f"[user-selected] {title}",
+                })
+                seen_ids.add(topic_id)
+                print(f"  [user-selected] '{title}' (topic_id={topic_id})")
 
-    # Step 3: Check Chroma + manifest for dedup
-    collection = get_course_materials_collection(course_id) if course_id else None
-    manifest = load_manifest(course_id) if course_id else {}
-    to_embed = []
+        if not matched:
+            print("[material_fetcher] No materials matched above threshold")
+            return {"embedded_materials": [], "materials_metadata": {}, "pipeline_log": log_step(state, "material_fetcher", "done", "0 matched", time.time() - t0)}
 
-    for item in matched:
-        topic_id = item["id"]
-        title = item["title"]
+        # Step 3: Check Chroma + manifest for dedup
+        collection = get_course_materials_collection(course_id) if course_id else None
+        manifest = load_manifest(course_id) if course_id else {}
+        to_embed = []
 
-        # Check Chroma first — if chunks already exist for this topic, skip
-        if collection and _is_already_in_chroma(collection, topic_id, course_id):
-            print(f"  [skip] '{title}' already in Chroma (topic_id={topic_id})")
-            # Ensure manifest is in sync
-            if title not in manifest:
-                manifest[title] = {
-                    "topic_id": topic_id,
-                    "chunk_count": "?",
-                    "embedded_at": "pre-existing",
-                }
-            continue
+        for item in matched:
+            topic_id = item["id"]
+            title = item["title"]
 
-        # Also check manifest as fallback
-        if title in manifest:
-            print(f"  [skip] '{title}' found in manifest ({manifest[title].get('chunk_count', '?')} chunks)")
-            continue
+            # Check Chroma first — if chunks already exist for this topic, skip
+            if collection and _is_already_in_chroma(collection, topic_id, course_id):
+                print(f"  [skip] '{title}' already in Chroma (topic_id={topic_id})")
+                # Ensure manifest is in sync
+                if title not in manifest:
+                    manifest[title] = {
+                        "topic_id": topic_id,
+                        "chunk_count": "?",
+                        "embedded_at": "pre-existing",
+                    }
+                continue
 
-        to_embed.append(item)
+            # Also check manifest as fallback
+            if title in manifest:
+                print(f"  [skip] '{title}' found in manifest ({manifest[title].get('chunk_count', '?')} chunks)")
+                continue
 
-    if not to_embed:
-        print("[material_fetcher] All matched materials already embedded")
+            to_embed.append(item)
+
+        if not to_embed:
+            print("[material_fetcher] All matched materials already embedded")
+            return {
+                "embedded_materials": [m["title"] for m in matched],
+                "materials_metadata": manifest,
+                "pipeline_log": log_step(state, "material_fetcher", "done", f"all {len(matched)} cached", time.time() - t0)
+            }
+
+        # Step 4+5: Download, extract, chunk, embed
+        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        embeddings_model = _get_embeddings()
+        embedded_names = []
+
+        for item in to_embed:
+            topic_id = item["id"]
+            title = item["title"]
+            print(f"  [download] '{title}' (topic_id={topic_id})...")
+
+            raw_bytes, text = _download_and_extract(topic_id, org_unit_id, bs_token)
+            if not text:
+                print(f"  [skip] Could not extract text from '{title}'")
+                continue
+
+            chunks = splitter.split_text(text)
+            if not chunks:
+                continue
+
+            if collection:
+                try:
+                    vectors = embeddings_model.embed_documents(chunks)
+                    content_hash = hashlib.md5(raw_bytes).hexdigest()
+
+                    collection.upsert(
+                        ids=[f"material_{course_id}_{topic_id}_chunk_{i}" for i in range(len(chunks))],
+                        documents=chunks,
+                        embeddings=vectors,
+                        metadatas=[
+                            {
+                                "source": title,
+                                "course_id": str(course_id),
+                                "material_type": item.get("matched_ref", "other"),
+                                "chunk_index": i,
+                                "topic_id": str(topic_id),
+                            }
+                            for i in range(len(chunks))
+                        ],
+                    )
+
+                    manifest[title] = {
+                        "topic_id": topic_id,
+                        "content_hash": content_hash,
+                        "chunk_count": len(chunks),
+                        "embedded_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    embedded_names.append(title)
+                    print(f"  [embedded] '{title}' — {len(chunks)} chunks")
+
+                except Exception as e:
+                    print(f"  [error] Failed to embed '{title}': {e}")
+
+        # Step 6: Save manifest
+        if course_id and manifest:
+            save_manifest(course_id, manifest)
+
+        all_embedded = [m["title"] for m in matched if m["title"] in manifest]
+        elapsed = time.time() - t0
+        print(f"[material_fetcher] Done in {elapsed:.1f}s — {len(embedded_names)} new, {len(all_embedded)} total embedded")
+
         return {
-            "embedded_materials": [m["title"] for m in matched],
+            "embedded_materials": all_embedded,
             "materials_metadata": manifest,
+            "pipeline_log": log_step(state, "material_fetcher", "done", f"{len(embedded_names)} new embedded", elapsed)
         }
 
-    # Step 4+5: Download, extract, chunk, embed
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    embeddings_model = _get_embeddings()
-    embedded_names = []
-
-    for item in to_embed:
-        topic_id = item["id"]
-        title = item["title"]
-        print(f"  [download] '{title}' (topic_id={topic_id})...")
-
-        raw_bytes, text = _download_and_extract(topic_id, org_unit_id, bs_token)
-        if not text:
-            print(f"  [skip] Could not extract text from '{title}'")
-            continue
-
-        chunks = splitter.split_text(text)
-        if not chunks:
-            continue
-
-        if collection:
-            try:
-                vectors = embeddings_model.embed_documents(chunks)
-                content_hash = hashlib.md5(raw_bytes).hexdigest()
-
-                collection.upsert(
-                    ids=[f"material_{course_id}_{topic_id}_chunk_{i}" for i in range(len(chunks))],
-                    documents=chunks,
-                    embeddings=vectors,
-                    metadatas=[
-                        {
-                            "source": title,
-                            "course_id": str(course_id),
-                            "material_type": item.get("matched_ref", "other"),
-                            "chunk_index": i,
-                            "topic_id": str(topic_id),
-                        }
-                        for i in range(len(chunks))
-                    ],
-                )
-
-                manifest[title] = {
-                    "topic_id": topic_id,
-                    "content_hash": content_hash,
-                    "chunk_count": len(chunks),
-                    "embedded_at": datetime.now(timezone.utc).isoformat(),
-                }
-                embedded_names.append(title)
-                print(f"  [embedded] '{title}' — {len(chunks)} chunks")
-
-            except Exception as e:
-                print(f"  [error] Failed to embed '{title}': {e}")
-
-    # Step 6: Save manifest
-    if course_id and manifest:
-        save_manifest(course_id, manifest)
-
-    all_embedded = [m["title"] for m in matched if m["title"] in manifest]
-    print(f"[material_fetcher] Done — {len(embedded_names)} new, {len(all_embedded)} total embedded")
-
-    return {
-        "embedded_materials": all_embedded,
-        "materials_metadata": manifest,
-    }
+    except Exception as e:
+        print(f"[material_fetcher] CRITICAL ERROR during fetch/embed: {e}")
+        return {
+            "embedded_materials": [],
+            "materials_metadata": {},
+            "pipeline_log": log_step(state, "material_fetcher", "error", str(e), time.time() - t0)
+        }

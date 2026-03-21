@@ -48,9 +48,14 @@ Rules:
 
 def query_rewriter(state: GraphState) -> dict:
     """Rewrite user prompt into 2-3 retrieval-optimized queries."""
+    import time
+    from utils.pipeline_log import log_step
+    
+    t0 = time.time()
+    
     prompt = state.get("user_prompt", "")
     if not prompt.strip():
-        return {"retrieval_queries": []}
+        return {"retrieval_queries": [], "pipeline_log": log_step(state, "query_rewriter", "skipped", "empty prompt", time.time() - t0)}
 
     summary = state.get("assignment_summary", "")
     chat_history = state.get("chat_history", [])
@@ -82,11 +87,13 @@ def query_rewriter(state: GraphState) -> dict:
             print(f"[query_rewriter] Generated {len(queries)} queries:")
             for q in queries:
                 print(f"  - {q}")
-            return {"retrieval_queries": queries}
+                
+            elapsed = time.time() - t0
+            return {"retrieval_queries": queries, "pipeline_log": log_step(state, "query_rewriter", "done", f"generated {len(queries)} diverse queries", elapsed)}
 
     except Exception as e:
         print(f"[query_rewriter] LLM rewriting failed: {e}")
 
     # Fallback: use original prompt
     print(f"[query_rewriter] Falling back to original prompt")
-    return {"retrieval_queries": [prompt]}
+    return {"retrieval_queries": [prompt], "pipeline_log": log_step(state, "query_rewriter", "warning", "generation failed, falling back to original prompt", time.time() - t0)}

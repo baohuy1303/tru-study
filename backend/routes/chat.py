@@ -19,6 +19,7 @@ class ChatRequest(BaseModel):
     assignment_text: str | None = None  # Instructions text from frontend
     assignment_attachments: list[dict] = []  # [{"file_id", "file_name", "size"}]
     chat_history: list[dict] = []
+    selected_topic_ids: list[dict] = []  # [{"id": 123, "title": "Chapter 5.pdf"}]
 
 
 @router.post("/chat")
@@ -38,8 +39,10 @@ async def chat(body: ChatRequest, token: str = Depends(get_bs_token)):
         "assignment_id": body.assignment_id,
         "assignment_text": body.assignment_text,
         "assignment_attachments": body.assignment_attachments,
+        "user_selected_topics": body.selected_topic_ids,
         "bs_token": token,
         "session_id": session_id,
+        "pipeline_log": [],
     }
 
     if session:
@@ -66,4 +69,5 @@ async def chat(body: ChatRequest, token: str = Depends(get_bs_token)):
         "context_mode": result.get("context_mode"),
         "retrieval_queries": result.get("retrieval_queries", []),
         "session_id": session_id,
+        "pipeline_log": result.get("pipeline_log", []),
     }

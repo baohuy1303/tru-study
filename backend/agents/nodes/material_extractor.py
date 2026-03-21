@@ -53,15 +53,19 @@ If no course materials are referenced, return an empty list. Do NOT hallucinate 
 
 def material_extractor(state: GraphState) -> dict:
     """Extract material references from assignment text using structured LLM output."""
+    import time
+    from utils.pipeline_log import log_step
+    
+    t0 = time.time()
     # Skip if references already cached (multi-turn)
     if state.get("material_references") is not None:
         print("[material_extractor] Skipping -- references already cached")
-        return {}
+        return {"pipeline_log": log_step(state, "material_extractor", "skipped", "references already cached", time.time() - t0)}
 
     text = state.get("assignment_text", "")
 
     if not text.strip():
-        return {"material_references": []}
+        return {"material_references": [], "pipeline_log": log_step(state, "material_extractor", "done", "no text", time.time() - t0)}
 
     try:
         llm = _get_llm()
@@ -79,9 +83,11 @@ def material_extractor(state: GraphState) -> dict:
                 print(f"  - {r['name']} ({r['material_type']})")
         else:
             print("[material_extractor] No material references found in assignment text")
+            
+        elapsed = time.time() - t0
 
-        return {"material_references": refs}
+        return {"material_references": refs, "pipeline_log": log_step(state, "material_extractor", "done", f"found {len(refs)} references", elapsed)}
 
     except Exception as e:
         print(f"[material_extractor] LLM extraction failed: {e}")
-        return {"material_references": []}
+        return {"material_references": [], "pipeline_log": log_step(state, "material_extractor", "error", str(e), time.time() - t0)}

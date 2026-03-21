@@ -214,11 +214,11 @@ Harden the pipeline for demo reliability. At a hackathon, the demo gods are merc
 
 ### Tasks
 
-**8.1 — PDF parsing failures.** If `pymupdf` returns near-empty text (common with scanned/image PDFs), catch it and return a clear error: "This PDF appears to be image-based and couldn't be parsed. Please upload a text-based PDF." Optionally add `pytesseract` OCR as a fallback if you have time.
+**8.1 — PDF parsing failures.** If `pymupdf` returns near-empty text (common with scanned/image PDFs), catch it and return a clear error: "This PDF appears to be image-based and couldn't be parsed. Please upload a text-based PDF." Optionally add `pytesseract` OCR as a fallback if you have time. (Add a placeholder function and we'll implement this later)
 
-**8.2 — API failures.** If the course materials API is down or returns errors, the pipeline should still work — just skip material fetching and respond using only the assignment context. Log the failure but don't crash.
+**8.2 — API failures.** If the course materials API is down or returns errors, the pipeline should still work — just skip material fetching and respond using only the assignment context. Then once the response is finished, tell the user to re-log in to refresh their token and try again. Log the failure but don't crash.
 
-**8.3 — Empty retrieval results.** If Chroma returns no relevant chunks (low similarity scores across the board), the response generator should acknowledge this: "I couldn't find directly relevant course materials for this question, but based on the assignment context, here's my understanding..." rather than hallucinating citations.
+**8.3 — Empty retrieval results.** If Chroma returns no relevant chunks (low similarity scores across the board), the response generator should acknowledge this: "I couldn't find directly relevant course materials for this question, you can manually pick the files you'd like me to inspect as an alternative, but based on the assignment context and my general knowledge, here's my understanding..." rather than hallucinating citations. Or use the LLM own knowledge to answer the question the best way.
 
 **8.4 — Token budget overflows.** Add a hard check before the final LLM call. If the assembled context exceeds the model's context window, truncate in priority order: chat history (oldest first), retrieved chunks (lowest relevance first), assignment context (switch from full text to summary if needed). Never truncate the system prompt.
 

@@ -35,5 +35,11 @@ class GraphState(TypedDict, total=False):
     retrieval_queries: list[str]
     retrieved_docs: list[Document]
 
+    # ── Manual material selection ────────────────────────────────────────────
+    user_selected_topics: list[dict]  # [{"id": int, "title": str}] from frontend
+
+    # ── Pipeline logging ───────────────────────────────────────────────────
+    pipeline_log: list[dict]  # [{"node", "status", "detail", "duration_s"}]
+
     # ── Output ───────────────────────────────────────────────────────────────
     response: str

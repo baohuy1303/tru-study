@@ -7,15 +7,34 @@ import { PanelRightOpen, PanelRightClose } from 'lucide-react';
 export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [selectedTask, setSelectedTask] = useState<any>(null);
   const [tasksOpen, setTasksOpen] = useState(true);
+  
+  // Map of topic_id -> { id, title }
+  const [checkedTopicsMap, setCheckedTopicsMap] = useState<Map<number, any>>(new Map());
 
   const handleTaskSelect = (course_id: any, task_id: any, type: string) => {
     if (!course_id) {
       setSelectedTask(null);
       return;
     }
+    // Try to get course name from sidebars if feasible, for now omitting 
+    // Wait... if we have the course object, we could pass its name too.
     setSelectedTask({ org_unit_id: course_id, task_id, type });
     setTasksOpen(false);
   };
+
+  const handleTopicToggle = (topic: any, checked: boolean) => {
+    setCheckedTopicsMap(prev => {
+      const next = new Map(prev);
+      if (checked) {
+        next.set(topic.id, { id: topic.id, title: topic.title });
+      } else {
+        next.delete(topic.id);
+      }
+      return next;
+    });
+  };
+
+  const selectedTopicsPayload = Array.from(checkedTopicsMap.values());
 
   return (
     <div className="flex h-screen bg-[#f4f3ec] text-[#08060d] dark:bg-[#16171d] dark:text-[#f3f4f6] overflow-hidden text-left font-sans max-w-none w-full border-none">
@@ -29,7 +48,11 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-          <Sidebar selectedTask={selectedTask} />
+          <Sidebar 
+            selectedTask={selectedTask} 
+            checkedTopics={new Set(checkedTopicsMap.keys())}
+            onTopicToggle={handleTopicToggle}
+          />
         </div>
       </aside>
 
@@ -45,7 +68,11 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
             <PanelRightOpen size={20} className="text-[#08060d] dark:text-[#f3f4f6]" />
           </button>
         )}
-        <ChatArea selectedTask={selectedTask} onClearTask={() => setSelectedTask(null)} />
+        <ChatArea 
+          selectedTask={selectedTask} 
+          onClearTask={() => setSelectedTask(null)}
+          selectedTopics={selectedTopicsPayload}
+        />
       </main>
 
       {/* Right Sidebar: Tasks & Workload */}
