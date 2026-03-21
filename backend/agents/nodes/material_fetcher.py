@@ -131,15 +131,12 @@ def material_fetcher(state: GraphState) -> dict:
     
     t0 = time.time()
 
-    # Skip if materials already cached (multi-turn)
-    if state.get("embedded_materials") is not None:
-        print("[material_fetcher] Skipping -- materials already cached")
-        return {"pipeline_log": log_step(state, "material_fetcher", "skipped", "materials already cached", time.time() - t0)}
+    user_topics = state.get("user_selected_topics") or []
 
-    references = state.get("material_references") or []
-    if not references:
-        print("[material_fetcher] No material references to fetch")
-        return {"embedded_materials": [], "materials_metadata": {}, "pipeline_log": log_step(state, "material_fetcher", "done", "no references", time.time() - t0)}
+    # Skip entirely if cached AND no user-selected topics to process
+    if state.get("embedded_materials") is not None and not user_topics:
+        print("[material_fetcher] Skipping -- materials already cached, no new selections")
+        return {"pipeline_log": log_step(state, "material_fetcher", "skipped", "materials already cached", time.time() - t0)}
 
     org_unit_id = state.get("org_unit_id")
     bs_token = state.get("bs_token", "")
@@ -148,6 +145,88 @@ def material_fetcher(state: GraphState) -> dict:
     if not org_unit_id or not bs_token:
         print("[material_fetcher] Missing org_unit_id or bs_token, skipping")
         return {"embedded_materials": [], "materials_metadata": {}, "pipeline_log": log_step(state, "material_fetcher", "error", "missing org_unit_id or token", time.time() - t0)}
+
+    # If cached but user added new topics: skip catalog fetch + fuzzy match, only process user selections
+    if state.get("embedded_materials") is not None and user_topics:
+        print(f"[material_fetcher] Cache hit but {len(user_topics)} user-selected topic(s) need processing")
+        try:
+            existing_embedded = list(state["embedded_materials"])
+            collection = get_course_materials_collection(course_id) if course_id else None
+            manifest = load_manifest(course_id) if course_id else {}
+            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+            embeddings_model = _get_embeddings()
+            new_names = []
+
+            for topic in user_topics:
+                topic_id = topic.get("id")
+                title = topic.get("title", f"topic_{topic_id}")
+                if not topic_id:
+                    continue
+
+                if collection and _is_already_in_chroma(collection, topic_id, course_id):
+                    print(f"  [skip] '{title}' already in Chroma")
+                    if title not in manifest:
+                        manifest[title] = {"topic_id": topic_id, "chunk_count": "?", "embedded_at": "pre-existing"}
+                    if title not in existing_embedded:
+                        existing_embedded.append(title)
+                    continue
+
+                if title in manifest:
+                    print(f"  [skip] '{title}' found in manifest")
+                    if title not in existing_embedded:
+                        existing_embedded.append(title)
+                    continue
+
+                print(f"  [download] '{title}' (topic_id={topic_id})...")
+                raw_bytes, text = _download_and_extract(topic_id, org_unit_id, bs_token)
+                if not text:
+                    print(f"  [skip] Could not extract text from '{title}'")
+                    continue
+
+                chunks = splitter.split_text(text)
+                if not chunks:
+                    continue
+
+                if collection:
+                    try:
+                        vectors = embeddings_model.embed_documents(chunks)
+                        content_hash = hashlib.md5(raw_bytes).hexdigest()
+                        collection.upsert(
+                            ids=[f"material_{course_id}_{topic_id}_chunk_{i}" for i in range(len(chunks))],
+                            documents=chunks,
+                            embeddings=vectors,
+                            metadatas=[{"source": title, "course_id": str(course_id), "material_type": "user-selected", "chunk_index": i, "topic_id": str(topic_id)} for i in range(len(chunks))],
+                        )
+                        manifest[title] = {"topic_id": topic_id, "content_hash": content_hash, "chunk_count": len(chunks), "embedded_at": datetime.now(timezone.utc).isoformat()}
+                        existing_embedded.append(title)
+                        new_names.append(title)
+                        print(f"  [embedded] '{title}' -- {len(chunks)} chunks")
+                    except Exception as e:
+                        print(f"  [error] Failed to embed '{title}': {e}")
+
+            if course_id and manifest:
+                save_manifest(course_id, manifest)
+
+            elapsed = time.time() - t0
+            detail = f"{len(new_names)} new user-selected embedded" if new_names else "all user-selected already cached"
+            print(f"[material_fetcher] Done in {elapsed:.1f}s -- {detail}")
+            return {
+                "embedded_materials": existing_embedded,
+                "materials_metadata": manifest,
+                "pipeline_log": log_step(state, "material_fetcher", "done", detail, elapsed),
+            }
+        except Exception as e:
+            print(f"[material_fetcher] Error processing user-selected topics: {e}")
+            return {
+                "embedded_materials": list(state.get("embedded_materials") or []),
+                "materials_metadata": {},
+                "pipeline_log": log_step(state, "material_fetcher", "error", str(e), time.time() - t0),
+            }
+
+    references = state.get("material_references") or []
+    if not references and not user_topics:
+        print("[material_fetcher] No material references to fetch")
+        return {"embedded_materials": [], "materials_metadata": {}, "pipeline_log": log_step(state, "material_fetcher", "done", "no references", time.time() - t0)}
 
     try:
         # Step 1: Get content catalog from Brightspace
@@ -165,14 +244,12 @@ def material_fetcher(state: GraphState) -> dict:
         print(f"[material_fetcher] Fuzzy matching {len(references)} references...")
         matched = _fuzzy_match(references, downloadable)
         seen_ids = {m["id"] for m in matched}
-        
+
         # Process user-selected topics (manual picks)
-        user_topics = state.get("user_selected_topics") or []
         for topic in user_topics:
             topic_id = topic.get("id")
             title = topic.get("title", f"topic_{topic_id}")
             if topic_id and topic_id not in seen_ids:
-                # Add to matched list as if fuzzy matched with score=100
                 matched.append({
                     "id": topic_id, "title": title, "topic_type": 1,
                     "url": None, "module_path": "user-selected",

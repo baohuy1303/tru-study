@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from dependencies import get_bs_token
 from agents.graph import build_graph
-from utils.session import build_session_id, load_session, append_turn, cache_pipeline_state
+from utils.session import build_session_id, load_session, append_turn, cache_pipeline_state, delete_session, delete_all_sessions
 
 router = APIRouter(prefix="/api")
 
@@ -22,8 +22,11 @@ class ChatRequest(BaseModel):
     selected_topic_ids: list[dict] = []  # [{"id": 123, "title": "Chapter 5.pdf"}]
 
 
-@router.post("/chat")
-async def chat(body: ChatRequest, token: str = Depends(get_bs_token)):
+from fastapi.responses import StreamingResponse
+import json
+
+@router.post("/chat/stream")
+async def chat_stream(body: ChatRequest, token: str = Depends(get_bs_token)):
     graph = build_graph()
 
     # Build session ID and load existing session
@@ -57,17 +60,46 @@ async def chat(body: ChatRequest, token: str = Depends(get_bs_token)):
     else:
         initial_state["chat_history"] = body.chat_history
 
-    result = await graph.ainvoke(initial_state)
+    async def event_generator():
+        last_state = initial_state.copy()
+        yield f"data: {json.dumps({'type': 'progress', 'node': 'Starting pipeline...'})}\n\n"
 
-    # Persist: append this turn and cache pipeline state
-    response_text = result.get("response", "")
-    append_turn(session_id, body.prompt, response_text)
-    cache_pipeline_state(session_id, result)
+        async for state in graph.astream(initial_state, stream_mode="values"):
+            last_state = state
+            
+            plog = state.get("pipeline_log", [])
+            node_name = "Processing..."
+            if plog and len(plog) > 0:
+                node_name = plog[-1].get("node", "Processing...")
+                
+            yield f"data: {json.dumps({'type': 'progress', 'node': node_name})}\n\n"
 
-    return {
-        "response": response_text,
-        "context_mode": result.get("context_mode"),
-        "retrieval_queries": result.get("retrieval_queries", []),
-        "session_id": session_id,
-        "pipeline_log": result.get("pipeline_log", []),
-    }
+        # After stream completes, persist the final state
+        response_text = last_state.get("response", "")
+        append_turn(session_id, body.prompt, response_text)
+        cache_pipeline_state(session_id, last_state)
+
+        final_payload = {
+            "type": "result",
+            "response": response_text,
+            "context_mode": last_state.get("context_mode"),
+            "retrieval_queries": last_state.get("retrieval_queries", []),
+            "session_id": session_id,
+            "pipeline_log": last_state.get("pipeline_log", [])
+        }
+        yield f"data: {json.dumps(final_payload)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.delete("/sessions/{course_id}/{assignment_id}")
+async def clear_session(course_id: int, assignment_id: int):
+    session_id = build_session_id(course_id, assignment_id)
+    deleted = delete_session(session_id)
+    return {"deleted": deleted, "session_id": session_id}
+
+
+@router.delete("/sessions")
+async def clear_all_sessions():
+    count = delete_all_sessions()
+    return {"deleted_count": count}

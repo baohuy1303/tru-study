@@ -69,3 +69,27 @@ def cache_pipeline_state(session_id: str, state: dict) -> None:
             cached[field] = state[field]
     session["cached_state"] = cached
     save_session(session_id, session)
+
+
+def delete_session(session_id: str) -> bool:
+    """Delete a single session file. Returns True if deleted, False if not found."""
+    path = _session_path(session_id)
+    if os.path.exists(path):
+        os.remove(path)
+        return True
+    return False
+
+
+def delete_all_sessions() -> int:
+    """Delete all session JSON files. Returns count of deleted files."""
+    if not os.path.exists(_SESSION_DIR):
+        return 0
+    count = 0
+    for fname in os.listdir(_SESSION_DIR):
+        if fname.endswith(".json"):
+            try:
+                os.remove(os.path.join(_SESSION_DIR, fname))
+                count += 1
+            except OSError:
+                pass
+    return count

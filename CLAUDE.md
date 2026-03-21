@@ -60,6 +60,8 @@ pdf_parser → token_gate (conditional)
 - **`brightspace.py`** — Recursive content tree walker. `get_content_catalog()` returns flat list of all topics with module paths.
 - **`pdf.py`** — `extract_text_from_pdf(path)` and `extract_text_from_bytes(bytes)` via `pymupdf`.
 - **`tokens.py`** — `count_tokens(text)` via `tiktoken`.
+- **`session.py`** — JSON session persistence at `storage/sessions/{course_id}_{assignment_id}.json`. Stores chat history and caches expensive pipeline state (assignment text, token count, summary, embeddings, material references) across turns so subsequent questions skip re-processing. Key functions: `build_session_id()`, `load_session()`, `save_session()`, `append_turn()`, `cache_pipeline_state()`.
+- **`pipeline_log.py`** — `log_step()` produces structured log entries (node name, status, duration, detail) returned to the frontend for pipeline execution visualization.
 
 ### Backend Routes & App
 - **`app.py`** — FastAPI app, CORS middleware (allows localhost:5173), mounts routers
@@ -72,10 +74,10 @@ pdf_parser → token_gate (conditional)
 ### Frontend (React + TypeScript + Tailwind)
 - **`src/App.tsx`** — Root component, manages auth state
 - **`src/lib/api.ts`** — Axios instance with baseURL `http://localhost:8000/api`, auto-injects Bearer token
-- **`src/components/Dashboard.tsx`** — Three-column layout: course sidebar, chat area, tasks sidebar
-- **`src/components/Sidebar.tsx`** — Course list + recursive content tree (lazy-loads modules/topics)
-- **`src/components/TasksSidebar.tsx`** — Pending assignments/quizzes with urgency indicators
-- **`src/components/ChatArea.tsx`** — Assignment detail view with instructions, attachments, and chat input (chat not yet wired to `/api/chat`)
+- **`src/components/Dashboard.tsx`** — Three-column layout: course sidebar, chat area, collapsible tasks sidebar. Tracks `checkedTopicsMap` (selected course topics) passed down to ChatArea.
+- **`src/components/Sidebar.tsx`** — Course list + recursive content tree (lazy-loads modules/topics). Emits `onTopicToggle` for each selectable topic.
+- **`src/components/TasksSidebar.tsx`** — Fetches `/api/dashboard/work`; groups tasks by course sorted by due date; color-codes urgency (red = overdue, amber = ≤3 days, gray = normal). Collapsible.
+- **`src/components/ChatArea.tsx`** — Full chat implementation: sends to `/api/chat` with assignment context + selected topics + chat history; persists per-task history in `localStorage` (`chat_{task_id}`); renders assistant responses via `react-markdown`; shows pipeline log (node-by-node execution trace).
 
 ## API Endpoints
 
@@ -119,4 +121,10 @@ EMBEDDING_MODEL=text-embedding-3-small      # Model for vector embeddings
 
 ## Implementation Status
 
-Phases 1-4 of `langgraph-plan.md` are complete. Phases 5 (query rewriting) and 6 (retrieval + response) are placeholders. Phases 7 (chat persistence) and 8 (error handling) are not yet started.
+- **Phases 1–4** complete: PDF parsing, context handling, material extraction, material fetching.
+- **Phase 5** (`query_rewriter`): placeholder — pass-through only; should rewrite multi-turn questions into standalone queries.
+- **Phase 6** (`responder`): placeholder — should do multi-query ChromaDB retrieval + grounded LLM response.
+- **Phase 7** (chat persistence): implemented via `utils/session.py` (backend JSON) + `localStorage` (frontend per-task).
+- **Phase 8** (error handling): not yet started.
+
+The `/api/chat` route is fully wired end-to-end but responses are not yet RAG-grounded (Phases 5–6 incomplete).

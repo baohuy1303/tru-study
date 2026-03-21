@@ -226,7 +226,13 @@ def responder(state: GraphState) -> dict:
 
     # Empty Retrieval notification
     if not ranked_chunks:
-        user_prompt = "[Note: No course materials were retrieved for this query. Responding based on assignment context and general knowledge.]\n\n" + user_prompt
+        user_prompt = (
+            "[System note: No course materials were retrieved for this query. "
+            "If you have relevant course files (slides, textbook chapters, lab guides), "
+            "you can select them using the checkboxes in the course sidebar on the left. "
+            "Responding based on assignment context and general knowledge for now.]\n\n"
+            + user_prompt
+        )
 
     # Step 3: Build assignment context based on mode
     if context_mode == "inject":

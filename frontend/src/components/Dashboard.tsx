@@ -2,7 +2,8 @@ import { useState } from 'react';
 import Sidebar from './Sidebar';
 import TasksSidebar from './TasksSidebar';
 import ChatArea from './ChatArea';
-import { PanelRightOpen, PanelRightClose } from 'lucide-react';
+import { PanelRightOpen, PanelRightClose, Trash2 } from 'lucide-react';
+import api from '../lib/api';
 
 export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [selectedTask, setSelectedTask] = useState<any>(null);
@@ -34,6 +35,17 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
 
   const selectedTopicsPayload = Array.from(checkedTopicsMap.values());
 
+  const handleClearAllSessions = async () => {
+    try {
+      await api.delete('/sessions');
+    } catch (err) {
+      console.error("Failed to clear all sessions", err);
+    }
+    Object.keys(localStorage)
+      .filter(k => k.startsWith('chat_'))
+      .forEach(k => localStorage.removeItem(k));
+  };
+
   return (
     <div className="flex h-screen bg-[#f4f3ec] text-[#08060d] dark:bg-[#16171d] dark:text-[#f3f4f6] overflow-hidden text-left font-sans max-w-none w-full border-none">
       
@@ -41,9 +53,18 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
       <aside className="w-80 shrink-0 border-r border-[#e5e4e7] dark:border-[#2e303a] bg-white dark:bg-[#1f2028] flex flex-col h-full shadow-[rgba(0,0,0,0.05)_2px_0_8px_-2px] z-20">
         <div className="p-4 border-b border-[#e5e4e7] dark:border-[#2e303a] flex items-center justify-between shrink-0">
           <h1 className="text-xl font-bold tracking-tight text-[#aa3bff] dark:text-[#c084fc] m-0">TruStudy</h1>
-          <button onClick={onLogout} className="text-sm font-medium text-[#6b6375] dark:text-[#9ca3af] hover:text-[#08060d] dark:hover:text-white transition-colors cursor-pointer text-right">
-            Logout
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleClearAllSessions}
+              className="p-1.5 hover:bg-rose-100 dark:hover:bg-rose-900/30 text-[#6b6375] hover:text-rose-500 dark:text-[#9ca3af] dark:hover:text-rose-400 rounded-lg transition-colors cursor-pointer"
+              title="Clear all chat sessions"
+            >
+              <Trash2 size={16} strokeWidth={2.5} />
+            </button>
+            <button onClick={onLogout} className="text-sm font-medium text-[#6b6375] dark:text-[#9ca3af] hover:text-[#08060d] dark:hover:text-white transition-colors cursor-pointer text-right">
+              Logout
+            </button>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
           <Sidebar 

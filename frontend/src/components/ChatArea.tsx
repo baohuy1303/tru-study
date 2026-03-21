@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../lib/api';
-import { FileText, Link as LinkIcon, Download, Clock, X, Terminal, Loader2, Send } from 'lucide-react';
+import { FileText, Link as LinkIcon, Download, Clock, X, Terminal, Loader2, Send, Trash2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -25,8 +26,16 @@ export default function ChatArea({
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }
+  }, [input]);
 
   // Auto-scroll chat to bottom
   const scrollToBottom = () => {
@@ -87,6 +96,18 @@ export default function ChatArea({
     fetchDetails();
   }, [selectedTask?.task_id, selectedTask?.org_unit_id, selectedTask?.type]);
 
+  const handleClearChat = async () => {
+    if (!selectedTask) return;
+    try {
+      await api.delete(`/sessions/${selectedTask.org_unit_id}/${selectedTask.task_id}`);
+    } catch (err) {
+      console.error("Failed to clear session", err);
+    }
+    localStorage.removeItem(`chat_${selectedTask.task_id}`);
+    setMessages([]);
+    setSessionId(null);
+  };
+
   const handleDownload = async (fileId: number, fileName: string) => {
     try {
       const res = await api.get(
@@ -135,20 +156,65 @@ export default function ChatArea({
         chat_history: messages.map(m => ({ role: m.role, content: m.content }))
       };
 
-      const res = await api.post('/chat', payload);
-      setSessionId(res.data.session_id);
-      
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: res.data.response,
-        pipelineLog: res.data.pipeline_log
-      }]);
+      const token = localStorage.getItem('bs_token');
+      const res = await fetch('http://localhost:8000/api/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : ''
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        throw new Error(`API error: ${res.status}`);
+      }
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let done = false;
+      let buffer = '';
+
+      while (!done && reader) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+        if (value) {
+          buffer += decoder.decode(value, { stream: true });
+          let boundary = buffer.indexOf('\n\n');
+          while (boundary !== -1) {
+            const chunk = buffer.slice(0, boundary).trim();
+            buffer = buffer.slice(boundary + 2);
+            if (chunk.startsWith('data: ')) {
+              const dataStr = chunk.replace('data: ', '');
+              if (dataStr) {
+                try {
+                  const data = JSON.parse(dataStr);
+                  if (data.type === 'progress') {
+                    setCurrentAiStep(data.node);
+                  } else if (data.type === 'result') {
+                    setSessionId(data.session_id);
+                    setMessages(prev => [...prev, {
+                      role: 'assistant',
+                      content: data.response,
+                      pipelineLog: data.pipeline_log
+                    }]);
+                  }
+                } catch(e) { 
+                  console.error("Error parsing stream chunk", e, dataStr); 
+                }
+              }
+            }
+            boundary = buffer.indexOf('\n\n');
+          }
+        }
+      }
 
     } catch (err) {
       console.error("Chat API failed", err);
       setMessages(prev => [...prev, { role: 'assistant', content: "Sorry, I encountered an error processing your request." }]);
     } finally {
       setIsTyping(false);
+      setCurrentAiStep(null);
     }
   };
 
@@ -181,13 +247,24 @@ export default function ChatArea({
             <div className="bg-white dark:bg-[#1f2028] p-8 md:p-10 rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-[#e5e4e7] dark:border-[#2e303a] mb-2 transition-all duration-300 relative">
               <div className="flex flex-col md:flex-row md:items-start justify-between gap-6 mb-8">
                 <div className="flex items-start gap-5 flex-1 min-w-0">
-                  <button 
-                     onClick={onClearTask}
-                     className="mt-1 p-2.5 bg-[#f4f3ec] hover:bg-[#e5e4e7] dark:bg-[#2e303a] dark:hover:bg-[#3f414d] text-[#6b6375] dark:text-[#9ca3af] rounded-xl transition-colors flex items-center justify-center cursor-pointer shrink-0"
-                     title="Close Assignment View"
-                  >
-                    <X size={20} strokeWidth={2.5} />
-                  </button>
+                  <div className="flex items-center gap-2 mt-1 shrink-0">
+                    <button
+                       onClick={onClearTask}
+                       className="p-2.5 bg-[#f4f3ec] hover:bg-[#e5e4e7] dark:bg-[#2e303a] dark:hover:bg-[#3f414d] text-[#6b6375] dark:text-[#9ca3af] rounded-xl transition-colors flex items-center justify-center cursor-pointer"
+                       title="Close Assignment View"
+                    >
+                      <X size={20} strokeWidth={2.5} />
+                    </button>
+                    {messages.length > 0 && (
+                      <button
+                        onClick={handleClearChat}
+                        className="p-2.5 bg-[#f4f3ec] hover:bg-rose-100 dark:bg-[#2e303a] dark:hover:bg-rose-900/30 text-[#6b6375] hover:text-rose-500 dark:text-[#9ca3af] dark:hover:text-rose-400 rounded-xl transition-colors flex items-center justify-center cursor-pointer"
+                        title="Clear chat history"
+                      >
+                        <Trash2 size={18} strokeWidth={2.5} />
+                      </button>
+                    )}
+                  </div>
                   <div className="flex-1 min-w-0">
                     <span className="text-xs font-extrabold uppercase tracking-widest text-[#aa3bff] dark:text-[#c084fc] mb-3 block opacity-90">
                       ASSIGNMENT {selectedTask.course_name ? `• ${selectedTask.course_name}` : ''}
@@ -268,10 +345,10 @@ export default function ChatArea({
                 }`}
               >
                 {msg.role === 'user' ? (
-                  <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
+                  <div className="whitespace-pre-wrap text-[15px] leading-[1.6] break-words">{msg.content}</div>
                 ) : (
-                  <div className="prose dark:prose-invert max-w-none text-[#08060d] dark:text-[#f3f4f6] prose-p:my-1 prose-ul:my-2">
-                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  <div className="prose dark:prose-invert max-w-none text-[#08060d] dark:text-[#f3f4f6] prose-p:my-1 prose-ul:my-2 break-words overflow-x-hidden text-[15px] leading-[1.6]">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                   </div>
                 )}
               </div>
@@ -308,9 +385,11 @@ export default function ChatArea({
 
           {isTyping && (
             <div className="flex justify-start">
-              <div className="bg-white dark:bg-[#1f2028] border border-[#e5e4e7] dark:border-[#2e303a] rounded-2xl rounded-bl-sm p-5 shadow-sm flex items-center gap-3">
+              <div className="bg-white dark:bg-[#1f2028] border border-[#e5e4e7] dark:border-[#2e303a] rounded-2xl rounded-bl-sm p-4 px-5 shadow-sm flex items-center gap-3">
                 <Loader2 className="animate-spin text-[#aa3bff] dark:text-[#c084fc]" size={20} />
-                <span className="text-sm font-medium text-[#6b6375] dark:text-[#9ca3af]">TruStudy is thinking...</span>
+                <span className="text-sm font-semibold text-[#6b6375] dark:text-[#9ca3af]">
+                  {currentAiStep ? `TruStudy is working: ${currentAiStep}...` : 'TruStudy is thinking...'}
+                </span>
               </div>
             </div>
           )}
@@ -323,16 +402,23 @@ export default function ChatArea({
       <div className="p-8 pt-0 w-full max-w-4xl mx-auto shrink-0 mt-auto bg-[#f4f3ec] dark:bg-[#16171d] relative">
         <form onSubmit={handleSubmit} className="w-full relative shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.4)] rounded-[1.5rem] border border-transparent dark:border-[#2e303a] font-sans flex flex-col bg-white dark:bg-[#1f2028] focus-within:ring-2 focus-within:ring-[#aa3bff] dark:focus-within:ring-[#c084fc] transition-all duration-200 group">
           
-          <input 
-            type="text" 
+          <textarea 
+            ref={textareaRef}
+            rows={1}
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit();
+              }
+            }}
             disabled={!selectedTask || isTyping}
             placeholder={
               !selectedTask ? "Select an assignment to chat..." : 
               isTyping ? "Wait for response..." : "Ask a question about this assignment..."
             }
-            className="w-full px-6 py-5 rounded-[1.5rem] bg-transparent text-[#08060d] dark:text-[#f3f4f6] focus:outline-none text-lg border-none"
+            className="w-full px-6 py-5 rounded-[1.5rem] bg-transparent text-[#08060d] dark:text-[#f3f4f6] focus:outline-none text-[16px] border-none resize-none overflow-hidden max-h-[300px]"
           />
           
           {selectedTopics && selectedTopics.length > 0 && (
