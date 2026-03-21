@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../lib/api';
-import { FileText, Link as LinkIcon, Download, Clock, X, Terminal, Loader2, Send, Trash2 } from 'lucide-react';
+import { FileText, Link as LinkIcon, Download, Clock, X, Terminal, Loader2, Send, Trash2, Paperclip, Pin, AlertTriangle, ExternalLink } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -10,14 +10,25 @@ interface Message {
   pipelineLog?: any[];
 }
 
-export default function ChatArea({ 
-  selectedTask, 
+interface UploadedFile {
+  file_id: string;
+  file_name: string;
+  path: string;
+  is_main: boolean;
+}
+
+export default function ChatArea({
+  selectedTask,
   onClearTask,
-  selectedTopics = []
-}: { 
-  selectedTask: any, 
+  selectedTopics = [],
+  resetKey = 0,
+  onLinkTopicReplaced,
+}: {
+  selectedTask: any,
   onClearTask: () => void,
-  selectedTopics?: any[]
+  selectedTopics?: any[],
+  resetKey?: number,
+  onLinkTopicReplaced?: (topicId: number, topicTitle: string, uploadData: any) => void,
 }) {
   const [taskDetails, setTaskDetails] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -26,6 +37,15 @@ export default function ChatArea({
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [currentAiStep, setCurrentAiStep] = useState<string | null>(null);
+
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [inaccessibleTopics, setInaccessibleTopics] = useState<any[]>([]);
+  const [uploadingForTopic, setUploadingForTopic] = useState<number | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -44,6 +64,22 @@ export default function ChatArea({
   useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping]);
+
+  // Reset uploaded files and inaccessible topics when task changes
+  useEffect(() => {
+    setUploadedFiles([]);
+    setInaccessibleTopics([]);
+  }, [selectedTask?.task_id]);
+
+  // Reset everything when resetKey changes (clear-all triggered from Dashboard)
+  useEffect(() => {
+    if (resetKey > 0) {
+      setUploadedFiles([]);
+      setMessages([]);
+      setSessionId(null);
+      setInaccessibleTopics([]);
+    }
+  }, [resetKey]);
 
   // Load persistence
   useEffect(() => {
@@ -80,7 +116,7 @@ export default function ChatArea({
       setTaskDetails(null);
       return;
     }
-    
+
     async function fetchDetails() {
       setLoading(true);
       try {
@@ -92,7 +128,7 @@ export default function ChatArea({
         setLoading(false);
       }
     }
-    
+
     fetchDetails();
   }, [selectedTask?.task_id, selectedTask?.org_unit_id, selectedTask?.type]);
 
@@ -108,13 +144,83 @@ export default function ChatArea({
     setSessionId(null);
   };
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const token = localStorage.getItem('bs_token');
+      const res = await fetch('http://localhost:8000/api/upload', {
+        method: 'POST',
+        headers: { 'Authorization': token ? `Bearer ${token}` : '' },
+        body: formData,
+      });
+      if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+      const data = await res.json();
+
+      // In freeform mode, first upload auto-becomes main
+      const isMain = !selectedTask && uploadedFiles.length === 0;
+      setUploadedFiles(prev => [...prev, { ...data, is_main: isMain }]);
+    } catch (err) {
+      console.error("Upload failed", err);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleUploadForTopic = async (e: React.ChangeEvent<HTMLInputElement>, topic: any) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setUploadingForTopic(topic.id);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const token = localStorage.getItem('bs_token');
+      const res = await fetch('http://localhost:8000/api/upload', {
+        method: 'POST',
+        headers: { 'Authorization': token ? `Bearer ${token}` : '' },
+        body: formData,
+      });
+      if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+      const data = await res.json();
+      onLinkTopicReplaced?.(topic.id, topic.title, data);
+      setInaccessibleTopics(prev => prev.filter(t => t.id !== topic.id));
+    } catch (err) {
+      console.error("Upload failed", err);
+    } finally {
+      setUploadingForTopic(null);
+    }
+  };
+
+  const handlePinFile = (file_id: string) => {
+    // Only allow pinning in freeform mode (no selected assignment task)
+    if (selectedTask) return;
+    setUploadedFiles(prev => prev.map(f => ({ ...f, is_main: f.file_id === file_id })));
+  };
+
+  const handleRemoveFile = (file_id: string) => {
+    setUploadedFiles(prev => {
+      const remaining = prev.filter(f => f.file_id !== file_id);
+      // If we removed the main file, make the first remaining file the main
+      if (prev.find(f => f.file_id === file_id)?.is_main && remaining.length > 0) {
+        remaining[0].is_main = true;
+      }
+      return remaining;
+    });
+  };
+
   const handleDownload = async (fileId: number, fileName: string) => {
     try {
       const res = await api.get(
         `/courses/${selectedTask.org_unit_id}/assignments/${selectedTask.task_id}/attachments/${fileId}/download`,
         { responseType: 'blob' }
       );
-      
+
       const url = window.URL.createObjectURL(res.data);
       const link = document.createElement('a');
       link.href = url;
@@ -128,13 +234,19 @@ export default function ChatArea({
     }
   };
 
+  // Check if assignment has only external links and no downloadable attachments
+  const hasOnlyExternalLinks = taskDetails &&
+    (taskDetails.link_attachments?.length > 0) &&
+    (!taskDetails.attachments || taskDetails.attachments.length === 0);
+
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!input.trim() || !selectedTask || isTyping) return;
+    const canChat = selectedTask || uploadedFiles.length > 0 || selectedTopics.length > 0;
+    if (!input.trim() || !canChat || isTyping) return;
 
     const userMsg = input.trim();
     setInput('');
-    
+
     const newMessages = [...messages, { role: 'user' as const, content: userMsg }];
     setMessages(newMessages);
     setIsTyping(true);
@@ -142,10 +254,10 @@ export default function ChatArea({
     try {
       const payload = {
         prompt: userMsg,
-        course_id: selectedTask.org_unit_id,
-        org_unit_id: selectedTask.org_unit_id,
-        course_name: selectedTask.course_name || "",
-        assignment_id: selectedTask.task_id,
+        course_id: selectedTask?.org_unit_id || 0,
+        org_unit_id: selectedTask?.org_unit_id || 0,
+        course_name: selectedTask?.course_name || "",
+        assignment_id: selectedTask?.task_id || null,
         assignment_text: taskDetails?.instructions_html || "",
         assignment_attachments: taskDetails?.attachments?.map((a: any) => ({
           file_id: a.file_id,
@@ -153,6 +265,7 @@ export default function ChatArea({
           size: a.size
         })) || [],
         selected_topic_ids: selectedTopics,
+        uploaded_files: uploadedFiles,
         chat_history: messages.map(m => ({ role: m.role, content: m.content }))
       };
 
@@ -198,9 +311,12 @@ export default function ChatArea({
                       content: data.response,
                       pipelineLog: data.pipeline_log
                     }]);
+                    if (data.inaccessible_topics?.length > 0) {
+                      setInaccessibleTopics(data.inaccessible_topics);
+                    }
                   }
-                } catch(e) { 
-                  console.error("Error parsing stream chunk", e, dataStr); 
+                } catch(e) {
+                  console.error("Error parsing stream chunk", e, dataStr);
                 }
               }
             }
@@ -218,18 +334,20 @@ export default function ChatArea({
     }
   };
 
+  const canChat = selectedTask || uploadedFiles.length > 0 || selectedTopics.length > 0;
+
   return (
     <div className="flex-1 flex flex-col w-full h-full overflow-hidden">
-      
+
       {/* Top Section: Task Details & Chat History */}
       <div className="flex-1 overflow-y-auto w-full custom-scrollbar flex flex-col pb-6">
-        {!selectedTask && (
+        {!selectedTask && messages.length === 0 && uploadedFiles.length === 0 && selectedTopics.length === 0 && (
           <div className="flex-1 flex flex-col justify-center items-center text-center opacity-80 mt-20 p-8 w-full max-w-4xl mx-auto shrink-0">
             <h2 className="text-4xl font-semibold text-[#08060d] dark:text-[#f3f4f6] tracking-tight m-0 mb-3">
               What do you want to learn today?
             </h2>
             <p className="text-lg text-[#6b6375] dark:text-[#9ca3af] m-0">
-              Select course materials on the left or an assignment on the right to get started.
+              Select an assignment on the right, pick course materials from the left, or upload your own files below.
             </p>
           </div>
         )}
@@ -274,7 +392,7 @@ export default function ChatArea({
                     </h2>
                   </div>
                 </div>
-                
+
                 <div className="text-left md:text-right shrink-0 flex flex-col items-start md:items-end">
                    {taskDetails.score_denominator && (
                      <div className="inline-block px-4 py-1.5 bg-[#f4f3ec] dark:bg-[#2e303a] rounded-xl text-sm font-bold text-[#08060d] dark:text-[#f3f4f6] mb-3 shadow-sm border border-[#e5e4e7] dark:border-[#3f414d] mt-4 md:mt-0">
@@ -291,10 +409,30 @@ export default function ChatArea({
               </div>
 
               {taskDetails.instructions_html && (
-                <div 
+                <div
                   className="prose dark:prose-invert max-w-none text-[#08060d] dark:text-[#f3f4f6] opacity-90 text-[16px] leading-relaxed border-t border-[#e5e4e7] dark:border-[#2e303a] pt-8"
-                  dangerouslySetInnerHTML={{ __html: taskDetails.instructions_html }} 
+                  dangerouslySetInnerHTML={{ __html: taskDetails.instructions_html }}
                 />
+              )}
+
+              {/* External link warning + upload slot */}
+              {hasOnlyExternalLinks && (
+                <div className="mt-8 p-5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-2xl">
+                  <div className="flex items-start gap-3 mb-3">
+                    <AlertTriangle size={18} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" strokeWidth={2.5} />
+                    <div>
+                      <p className="text-sm font-bold text-amber-800 dark:text-amber-200 mb-1">External assignment file detected</p>
+                      <p className="text-sm text-amber-700 dark:text-amber-300">
+                        This assignment links to an external file (e.g. Google Drive or Docs). We may not be able to download it automatically. Upload the file manually below for best results.
+                      </p>
+                    </div>
+                  </div>
+                  <label className="inline-flex items-center gap-2 px-4 py-2 bg-amber-100 dark:bg-amber-800/40 hover:bg-amber-200 dark:hover:bg-amber-700/50 text-amber-800 dark:text-amber-200 rounded-xl text-sm font-semibold cursor-pointer transition-colors border border-amber-200 dark:border-amber-700">
+                    <Paperclip size={14} strokeWidth={2.5} />
+                    Upload assignment file
+                    <input type="file" className="hidden" accept=".pdf,.doc,.docx,.txt,.pptx,.ppt" onChange={handleFileUpload} />
+                  </label>
+                </div>
               )}
 
               {/* Attachments */}
@@ -309,7 +447,7 @@ export default function ChatArea({
                           <p className="text-[15px] font-semibold text-[#08060d] dark:text-[#f3f4f6] truncate group-hover:text-[#aa3bff] dark:group-hover:text-[#c084fc] transition-colors">{a.file_name}</p>
                           <p className="text-xs font-medium tracking-wide text-[#6b6375] dark:text-[#9ca3af] mt-1">{(a.size / 1024).toFixed(1)} KB</p>
                         </div>
-                        <button 
+                        <button
                           onClick={() => handleDownload(a.file_id, a.file_name)}
                           className="p-2.5 bg-white dark:bg-[#1f2028] border border-[#e5e4e7] dark:border-[#3f414d] hover:bg-[#aa3bff] hover:text-white dark:hover:bg-[#c084fc] dark:hover:text-[#08060d] rounded-xl transition-all shadow-sm text-[#08060d] dark:text-[#f3f4f6] shrink-0 cursor-pointer"
                         >
@@ -333,14 +471,49 @@ export default function ChatArea({
           </div>
         )}
 
+        {/* Inaccessible course materials banner */}
+        {inaccessibleTopics.length > 0 && (
+          <div className="px-8 pb-4 w-full max-w-5xl mx-auto">
+            <div className="p-5 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-2xl">
+              <div className="flex items-start gap-3 mb-3">
+                <ExternalLink size={18} className="text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" strokeWidth={2.5} />
+                <div>
+                  <p className="text-sm font-bold text-blue-800 dark:text-blue-200 mb-1">Some course materials couldn't be accessed</p>
+                  <p className="text-sm text-blue-700 dark:text-blue-300">
+                    These resources are external links. Download them manually and upload here for the best results.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2 mt-3">
+                {inaccessibleTopics.map((topic: any) => (
+                  <div key={topic.id} className="flex items-center gap-3 p-3 bg-white dark:bg-[#1f2028] rounded-xl border border-blue-100 dark:border-blue-800">
+                    <ExternalLink size={14} className="text-blue-500 shrink-0" />
+                    <a href={topic.url} target="_blank" rel="noreferrer"
+                       className="text-sm font-semibold text-blue-700 dark:text-blue-300 flex-1 hover:underline truncate">
+                      {topic.title}
+                    </a>
+                    <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-100 dark:bg-blue-800/40 hover:bg-blue-200 dark:hover:bg-blue-700/50 text-blue-800 dark:text-blue-200 rounded-lg text-xs font-semibold cursor-pointer transition-colors shrink-0 border border-blue-200 dark:border-blue-700">
+                      {uploadingForTopic === topic.id ? <Loader2 size={12} className="animate-spin" /> : <Paperclip size={12} strokeWidth={2.5} />}
+                      Upload
+                      <input type="file" className="hidden" accept=".pdf,.doc,.docx,.txt,.pptx,.ppt"
+                             onChange={(e) => handleUploadForTopic(e, topic)}
+                             disabled={uploadingForTopic === topic.id} />
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Chat Thread */}
         <div className="w-full max-w-4xl mx-auto px-4 lg:px-8 space-y-6 shrink-0 pb-4">
           {messages.map((msg, i) => (
             <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-              <div 
+              <div
                 className={`max-w-[85%] md:max-w-[75%] rounded-2xl p-5 ${
-                  msg.role === 'user' 
-                    ? 'bg-[#aa3bff] text-white rounded-br-sm' 
+                  msg.role === 'user'
+                    ? 'bg-[#aa3bff] text-white rounded-br-sm'
                     : 'bg-white dark:bg-[#1f2028] text-[#08060d] dark:text-[#f3f4f6] border border-[#e5e4e7] dark:border-[#2e303a] rounded-bl-sm shadow-sm'
                 }`}
               >
@@ -352,7 +525,7 @@ export default function ChatArea({
                   </div>
                 )}
               </div>
-              
+
               {/* Pipeline Log visualization (only for assistant messages) */}
               {msg.role === 'assistant' && msg.pipelineLog && msg.pipelineLog.length > 0 && (
                 <div className="mt-3 bg-[#1e1e1e] text-[#d4d4d4] rounded-lg p-3 text-[11px] font-mono w-full md:max-w-[75%] border border-[#333] shadow-inner overflow-hidden flex flex-col gap-1.5 opacity-90 transition-opacity hover:opacity-100">
@@ -365,7 +538,7 @@ export default function ChatArea({
                       <div className="flex justify-between items-center group">
                         <div className="flex items-center gap-1.5 text-[#ce9178]">
                           <span className={`${
-                            log.status === 'done' ? 'text-green-500' : 
+                            log.status === 'done' ? 'text-green-500' :
                             log.status === 'error' ? 'text-red-500' :
                             log.status === 'warning' ? 'text-yellow-500' : 'text-gray-500'
                           }`}>[{log.status}]</span>
@@ -388,7 +561,7 @@ export default function ChatArea({
               <div className="bg-white dark:bg-[#1f2028] border border-[#e5e4e7] dark:border-[#2e303a] rounded-2xl rounded-bl-sm p-4 px-5 shadow-sm flex items-center gap-3">
                 <Loader2 className="animate-spin text-[#aa3bff] dark:text-[#c084fc]" size={20} />
                 <span className="text-sm font-semibold text-[#6b6375] dark:text-[#9ca3af]">
-                  {currentAiStep ? `TruStudy is working: ${currentAiStep}...` : 'TruStudy is thinking...'}
+                  {currentAiStep ? `TruStudy: ${currentAiStep}...` : 'TruStudy is thinking...'}
                 </span>
               </div>
             </div>
@@ -400,9 +573,54 @@ export default function ChatArea({
 
       {/* Bottom Section: Chat Input */}
       <div className="p-8 pt-0 w-full max-w-4xl mx-auto shrink-0 mt-auto bg-[#f4f3ec] dark:bg-[#16171d] relative">
-        <form onSubmit={handleSubmit} className="w-full relative shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.4)] rounded-[1.5rem] border border-transparent dark:border-[#2e303a] font-sans flex flex-col bg-white dark:bg-[#1f2028] focus-within:ring-2 focus-within:ring-[#aa3bff] dark:focus-within:ring-[#c084fc] transition-all duration-200 group">
-          
-          <textarea 
+
+        {/* Uploaded files row */}
+        {uploadedFiles.length > 0 && (
+          <div className="mb-3 flex flex-wrap gap-2">
+            {uploadedFiles.map(f => (
+              <div
+                key={f.file_id}
+                className={`inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-xl text-[12px] font-semibold border transition-all ${
+                  f.is_main
+                    ? 'bg-[#aa3bff]/10 border-[#aa3bff] text-[#aa3bff] dark:text-[#c084fc]'
+                    : 'bg-white dark:bg-[#1f2028] border-[#e5e4e7] dark:border-[#2e303a] text-[#6b6375] dark:text-[#9ca3af]'
+                }`}
+              >
+                <FileText size={12} strokeWidth={2.5} />
+                <span className="max-w-[120px] truncate">{f.file_name}</span>
+                {f.is_main && <span className="text-[10px] font-bold opacity-70 ml-0.5">MAIN</span>}
+                {/* Pin button — only in freeform mode */}
+                {!selectedTask && !f.is_main && (
+                  <button
+                    onClick={() => handlePinFile(f.file_id)}
+                    className="ml-1 p-0.5 hover:text-[#aa3bff] dark:hover:text-[#c084fc] transition-colors cursor-pointer"
+                    title="Set as main assignment file"
+                  >
+                    <Pin size={11} strokeWidth={2.5} />
+                  </button>
+                )}
+                <button
+                  onClick={() => handleRemoveFile(f.file_id)}
+                  className="ml-0.5 p-0.5 hover:text-rose-500 transition-colors cursor-pointer"
+                  title="Remove file"
+                >
+                  <X size={11} strokeWidth={2.5} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <form 
+          onSubmit={handleSubmit} 
+          className={`w-full relative shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.4)] rounded-[1.5rem] border font-sans flex flex-col transition-all duration-200 group
+            ${!canChat 
+              ? 'bg-gray-100 dark:bg-gray-800/40 border-gray-200 dark:border-gray-700 opacity-100 cursor-not-allowed shadow-none' 
+              : 'bg-white dark:bg-[#1f2028] border-transparent dark:border-[#2e303a] focus-within:ring-2 focus-within:ring-[#aa3bff] dark:focus-within:ring-[#c084fc]'
+            }`}
+        >
+
+          <textarea
             ref={textareaRef}
             rows={1}
             value={input}
@@ -413,32 +631,53 @@ export default function ChatArea({
                 handleSubmit();
               }
             }}
-            disabled={!selectedTask || isTyping}
+            disabled={!canChat || isTyping}
             placeholder={
-              !selectedTask ? "Select an assignment to chat..." : 
-              isTyping ? "Wait for response..." : "Ask a question about this assignment..."
+              !canChat ? "Upload a file or select materials to start chatting..." :
+              isTyping ? "Wait for response..." :
+              selectedTask ? "Ask a question about this assignment..." : "Ask anything about your uploaded files or selected materials..."
             }
-            className="w-full px-6 py-5 rounded-[1.5rem] bg-transparent text-[#08060d] dark:text-[#f3f4f6] focus:outline-none text-[16px] border-none resize-none overflow-hidden max-h-[300px]"
+            className="w-full px-6 pt-5 pb-2 rounded-[1.5rem] bg-transparent text-[#08060d] dark:text-[#f3f4f6] focus:outline-none text-[16px] border-none resize-none overflow-hidden max-h-[300px]"
           />
-          
-          {selectedTopics && selectedTopics.length > 0 && (
-             <div className="px-6 pb-4 pt-1 flex gap-2 overflow-x-auto custom-scrollbar">
-                {selectedTopics.map((t, idx) => (
-                  <span key={idx} className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-bold bg-[#f4f3ec] dark:bg-[#2e303a] text-[#aa3bff] dark:text-[#c084fc] whitespace-nowrap border border-[#e5e4e7] dark:border-[#3f414d]">
-                    <FileText size={12} className="mr-1.5" />
-                    {t.title}
-                  </span>
-                ))}
-             </div>
-          )}
 
-          <button 
-            type="submit"
-            disabled={!input.trim() || !selectedTask || isTyping}
-            className="absolute right-3.5 top-3.5 p-2.5 bg-[#aa3bff] hover:bg-[#9922ff] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl shadow-md transition-colors border-none flex items-center justify-center shrink-0"
-          >
-            <Send size={20} strokeWidth={2.5} className="-ml-0.5 mt-0.5" />
-          </button>
+          <div className="flex items-center justify-between px-4 pb-4 pt-1 gap-3">
+            {/* Left: file upload + selected topics */}
+            <div className="flex items-center gap-2 flex-1 overflow-x-auto custom-scrollbar min-w-0">
+              {/* Upload button */}
+              <label className={`shrink-0 p-2 rounded-lg transition-colors cursor-pointer ${isUploading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[#f4f3ec] dark:hover:bg-[#2e303a]'} text-[#6b6375] dark:text-[#9ca3af]`} title="Upload a file">
+                {isUploading ? <Loader2 size={18} className="animate-spin" /> : <Paperclip size={18} strokeWidth={2.5} />}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.doc,.docx,.txt,.pptx,.ppt"
+                  onChange={handleFileUpload}
+                  disabled={isUploading}
+                />
+              </label>
+
+              {/* Selected course topics */}
+              {selectedTopics && selectedTopics.length > 0 && selectedTopics.map((t, idx) => (
+                <span key={idx} className="inline-flex items-center px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-[#f4f3ec] dark:bg-[#2e303a] text-[#aa3bff] dark:text-[#c084fc] whitespace-nowrap border border-[#e5e4e7] dark:border-[#3f414d] shadow-sm shrink-0">
+                  <FileText size={12} className="mr-1.5" />
+                  {t.title}
+                </span>
+              ))}
+            </div>
+
+            {/* Right: send button */}
+            <button
+              type="submit"
+              disabled={!input.trim() || !canChat || isTyping}
+              className={`p-2.5 rounded-xl shadow-md transition-all duration-200 border-none flex items-center justify-center shrink-0
+                ${(!input.trim() || !canChat || isTyping)
+                  ? 'bg-gray-200 dark:bg-gray-700 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                  : 'bg-[#aa3bff] hover:bg-[#9922ff] text-white cursor-pointer hover:scale-105 active:scale-95'
+                }`}
+            >
+              <Send size={20} strokeWidth={2.5} className="-ml-0.5 mt-0.5" />
+            </button>
+          </div>
         </form>
       </div>
     </div>

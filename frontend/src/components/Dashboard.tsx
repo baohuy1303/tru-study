@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Sidebar from './Sidebar';
 import TasksSidebar from './TasksSidebar';
 import ChatArea from './ChatArea';
@@ -8,9 +8,27 @@ import api from '../lib/api';
 export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [selectedTask, setSelectedTask] = useState<any>(null);
   const [tasksOpen, setTasksOpen] = useState(true);
-  
-  // Map of topic_id -> { id, title }
+  const [resetKey, setResetKey] = useState(0);
+
+  // Map of topic_id -> { id, title, path?, file_name? }
   const [checkedTopicsMap, setCheckedTopicsMap] = useState<Map<number, any>>(new Map());
+
+  // Map of topic_id -> upload metadata for link topics replaced with local files
+  const [replacedLinksMap, setReplacedLinksMap] = useState<Map<number, any>>(new Map());
+
+  // Load persisted link replacements on mount
+  useEffect(() => {
+    const map = new Map<number, any>();
+    Object.keys(localStorage)
+      .filter(k => k.startsWith('link_topic_'))
+      .forEach(k => {
+        const id = parseInt(k.replace('link_topic_', ''));
+        if (!isNaN(id)) {
+          try { map.set(id, JSON.parse(localStorage.getItem(k)!)); } catch {}
+        }
+      });
+    if (map.size > 0) setReplacedLinksMap(map);
+  }, []);
 
   const handleTaskSelect = (course_id: any, task_id: any, type: string, course_name?: string) => {
     if (!course_id) {
@@ -25,10 +43,32 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     setCheckedTopicsMap(prev => {
       const next = new Map(prev);
       if (checked) {
-        next.set(topic.id, { id: topic.id, title: topic.title });
+        // Include path/file_name if present (for replaced link topics)
+        const entry: any = { id: topic.id, title: topic.title };
+        if (topic.path) entry.path = topic.path;
+        if (topic.file_name) entry.file_name = topic.file_name;
+        next.set(topic.id, entry);
       } else {
         next.delete(topic.id);
       }
+      return next;
+    });
+  };
+
+  const handleLinkTopicReplaced = (topicId: number, topicTitle: string, uploadData: any) => {
+    // Save replacement to state
+    setReplacedLinksMap(prev => {
+      const next = new Map(prev);
+      next.set(topicId, uploadData);
+      return next;
+    });
+    // Persist to localStorage
+    localStorage.setItem(`link_topic_${topicId}`, JSON.stringify(uploadData));
+
+    // Auto-select the replaced topic for RAG
+    setCheckedTopicsMap(prev => {
+      const next = new Map(prev);
+      next.set(topicId, { id: topicId, title: topicTitle, path: uploadData.path, file_name: uploadData.file_name });
       return next;
     });
   };
@@ -44,11 +84,17 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     Object.keys(localStorage)
       .filter(k => k.startsWith('chat_'))
       .forEach(k => localStorage.removeItem(k));
+
+    // Reset all in-memory state
+    setSelectedTask(null);
+    setCheckedTopicsMap(new Map());
+    setTasksOpen(true);
+    setResetKey(k => k + 1);
   };
 
   return (
     <div className="flex h-screen bg-[#f4f3ec] text-[#08060d] dark:bg-[#16171d] dark:text-[#f3f4f6] overflow-hidden text-left font-sans max-w-none w-full border-none">
-      
+
       {/* Left Sidebar: Course Navigation */}
       <aside className="w-80 shrink-0 border-r border-[#e5e4e7] dark:border-[#2e303a] bg-white dark:bg-[#1f2028] flex flex-col h-full shadow-[rgba(0,0,0,0.05)_2px_0_8px_-2px] z-20">
         <div className="p-4 border-b border-[#e5e4e7] dark:border-[#2e303a] flex items-center justify-between shrink-0">
@@ -67,10 +113,12 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-          <Sidebar 
-            selectedTask={selectedTask} 
+          <Sidebar
+            selectedTask={selectedTask}
             checkedTopics={new Set(checkedTopicsMap.keys())}
             onTopicToggle={handleTopicToggle}
+            replacedLinksMap={replacedLinksMap}
+            onLinkTopicReplaced={handleLinkTopicReplaced}
           />
         </div>
       </aside>
@@ -79,7 +127,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
       <main className="flex-1 flex flex-col min-w-0 h-full overflow-hidden relative z-10">
         {/* Toggle button for right sidebar if closed */}
         {!tasksOpen && (
-          <button 
+          <button
             onClick={() => setTasksOpen(true)}
             className="absolute top-4 right-4 z-50 p-2.5 bg-white dark:bg-[#1f2028] border border-[#e5e4e7] dark:border-[#2e303a] rounded-xl shadow-md hover:bg-[#f4f3ec] dark:hover:bg-[#2e303a] transition-all"
             title="Open Tasks Sidebar"
@@ -87,10 +135,12 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
             <PanelRightOpen size={20} className="text-[#08060d] dark:text-[#f3f4f6]" />
           </button>
         )}
-        <ChatArea 
-          selectedTask={selectedTask} 
+        <ChatArea
+          selectedTask={selectedTask}
           onClearTask={() => setSelectedTask(null)}
           selectedTopics={selectedTopicsPayload}
+          resetKey={resetKey}
+          onLinkTopicReplaced={handleLinkTopicReplaced}
         />
       </main>
 

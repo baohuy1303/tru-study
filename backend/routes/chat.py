@@ -20,6 +20,7 @@ class ChatRequest(BaseModel):
     assignment_attachments: list[dict] = []  # [{"file_id", "file_name", "size"}]
     chat_history: list[dict] = []
     selected_topic_ids: list[dict] = []  # [{"id": 123, "title": "Chapter 5.pdf"}]
+    uploaded_files: list[dict] = []      # [{"file_id", "file_name", "path", "is_main": bool}]
 
 
 from fastapi.responses import StreamingResponse
@@ -43,6 +44,7 @@ async def chat_stream(body: ChatRequest, token: str = Depends(get_bs_token)):
         "assignment_text": body.assignment_text,
         "assignment_attachments": body.assignment_attachments,
         "user_selected_topics": body.selected_topic_ids,
+        "uploaded_files": body.uploaded_files,
         "bs_token": token,
         "session_id": session_id,
         "pipeline_log": [],
@@ -84,6 +86,7 @@ async def chat_stream(body: ChatRequest, token: str = Depends(get_bs_token)):
             "response": response_text,
             "context_mode": last_state.get("context_mode"),
             "retrieval_queries": last_state.get("retrieval_queries", []),
+            "inaccessible_topics": last_state.get("inaccessible_topics", []),
             "session_id": session_id,
             "pipeline_log": last_state.get("pipeline_log", [])
         }

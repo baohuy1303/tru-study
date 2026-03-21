@@ -38,6 +38,13 @@ class GraphState(TypedDict, total=False):
     # ── Manual material selection ────────────────────────────────────────────
     user_selected_topics: list[dict]  # [{"id": int, "title": str}] from frontend
 
+    # ── File uploads ─────────────────────────────────────────────────────────
+    uploaded_files: list[dict]        # [{"file_id", "file_name", "path", "is_main": bool}]
+    supplementary_uploads: list[dict] # Non-main uploaded files, set by pdf_parser for material_fetcher
+
+    # ── Inaccessible topics ────────────────────────────────────────────────
+    inaccessible_topics: list[dict]  # [{"id", "title", "url"}] link-type topics the fetcher couldn't download
+
     # ── Pipeline logging ───────────────────────────────────────────────────
     pipeline_log: list[dict]  # [{"node", "status", "detail", "duration_s"}]
 

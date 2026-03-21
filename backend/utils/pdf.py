@@ -1,6 +1,12 @@
 """PDF text extraction utilities using pymupdf."""
 
+import base64
+import os
+
 import pymupdf
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 def extract_text_from_pdf(pdf_path: str) -> str:
@@ -41,23 +47,74 @@ def extract_text_from_bytes(pdf_bytes: bytes) -> str:
     return full_text
 
 
-def extract_text_with_ocr(pdf_path: str) -> str:
-    """Placeholder for OCR-based text extraction from image PDFs.
-
-    TODO: Implement using pytesseract or similar OCR library.
-    This should be called as a fallback when standard extraction
-    returns near-empty text from a non-empty PDF.
-    """
-    # Future: pip install pytesseract pillow
-    # 1. Convert PDF pages to images using pymupdf
-    # 2. Run pytesseract.image_to_string() on each page
-    # 3. Join and return extracted text
-    return ""
-
-
 def extract_text_with_ocr_bytes(pdf_bytes: bytes) -> str:
-    """Placeholder for OCR extraction from in-memory PDF bytes.
+    """Extract text from image-based PDF using GPT-4o Vision as fallback.
 
-    TODO: Implement using pytesseract or similar OCR library.
+    Called when standard PyMuPDF extraction returns near-empty text from a
+    non-empty PDF (image-based slides, scanned documents, etc.).
     """
-    return ""
+    from openai import OpenAI
+
+    try:
+        doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    except Exception as e:
+        print(f"[ocr] Failed to open PDF for OCR: {e}")
+        return ""
+
+    if doc.page_count == 0:
+        return ""
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        print("[ocr] OPENAI_API_KEY not set, cannot run OCR")
+        return ""
+
+    client = OpenAI(api_key=api_key)
+    pages_text = []
+
+    for page_num, page in enumerate(doc):
+        mat = pymupdf.Matrix(150 / 72, 150 / 72)
+        pix = page.get_pixmap(matrix=mat)
+        img_bytes = pix.tobytes("png")
+        b64 = base64.b64encode(img_bytes).decode("utf-8")
+
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Extract all text from this page exactly as it appears. Return only the extracted text, no commentary.",
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{b64}",
+                                "detail": "high",
+                            },
+                        },
+                    ],
+                }],
+                max_tokens=2000,
+            )
+            page_text = response.choices[0].message.content or ""
+            if page_text.strip():
+                pages_text.append(page_text.strip())
+            print(f"[ocr] Page {page_num + 1}/{doc.page_count} extracted ({len(page_text)} chars)")
+        except Exception as e:
+            print(f"[ocr] GPT-4o Vision failed on page {page_num + 1}: {e}")
+
+    doc.close()
+    return "\n\n".join(pages_text)
+
+
+def extract_text_with_ocr(pdf_path: str) -> str:
+    """Extract text from image-based PDF file using GPT-4o Vision."""
+    try:
+        with open(pdf_path, "rb") as f:
+            return extract_text_with_ocr_bytes(f.read())
+    except Exception as e:
+        print(f"[ocr] Failed to read file for OCR at {pdf_path}: {e}")
+        return ""

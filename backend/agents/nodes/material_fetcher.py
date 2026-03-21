@@ -18,7 +18,7 @@ from agents.state import GraphState
 from utils.brightspace import get_content_catalog, BS_BASE, LE_VER
 from utils.chroma import get_course_materials_collection
 from utils.manifest import load_manifest, save_manifest
-from utils.pdf import extract_text_from_bytes
+from utils.pdf import extract_text_from_bytes, extract_text_with_ocr_bytes
 
 load_dotenv()
 
@@ -144,7 +144,7 @@ def material_fetcher(state: GraphState) -> dict:
 
     if not org_unit_id or not bs_token:
         print("[material_fetcher] Missing org_unit_id or bs_token, skipping")
-        return {"embedded_materials": [], "materials_metadata": {}, "pipeline_log": log_step(state, "material_fetcher", "error", "missing org_unit_id or token", time.time() - t0)}
+        return {"embedded_materials": [], "materials_metadata": {}, "inaccessible_topics": [], "pipeline_log": log_step(state, "material_fetcher", "error", "missing org_unit_id or token", time.time() - t0)}
 
     # If cached but user added new topics: skip catalog fetch + fuzzy match, only process user selections
     if state.get("embedded_materials") is not None and user_topics:
@@ -157,10 +157,21 @@ def material_fetcher(state: GraphState) -> dict:
             embeddings_model = _get_embeddings()
             new_names = []
 
+            # Separate local-file topics from Brightspace topics
+            cached_local_files = []
             for topic in user_topics:
                 topic_id = topic.get("id")
                 title = topic.get("title", f"topic_{topic_id}")
                 if not topic_id:
+                    continue
+
+                # Local file (replaced link upload) — process separately
+                if topic.get("path"):
+                    cached_local_files.append({
+                        "file_id": str(topic_id),
+                        "file_name": topic.get("file_name") or title,
+                        "path": topic["path"],
+                    })
                     continue
 
                 if collection and _is_already_in_chroma(collection, topic_id, course_id):
@@ -204,6 +215,43 @@ def material_fetcher(state: GraphState) -> dict:
                     except Exception as e:
                         print(f"  [error] Failed to embed '{title}': {e}")
 
+            # Process local file topics (replaced link uploads)
+            for upload in cached_local_files:
+                path = upload.get("path", "")
+                title = upload.get("file_name", "uploaded_file")
+                file_id = upload.get("file_id", title)
+                if title in manifest:
+                    print(f"  [skip] Local file '{title}' already in manifest")
+                    if title not in existing_embedded:
+                        existing_embedded.append(title)
+                    continue
+                try:
+                    with open(path, "rb") as fh:
+                        raw_bytes = fh.read()
+                    text = extract_text_from_bytes(raw_bytes)
+                    if len(text.strip()) < 100:
+                        text = extract_text_with_ocr_bytes(raw_bytes)
+                    if not text:
+                        print(f"  [skip] Could not extract text from local file '{title}'")
+                        continue
+                    chunks = splitter.split_text(text)
+                    if not chunks or not collection:
+                        continue
+                    vectors = embeddings_model.embed_documents(chunks)
+                    content_hash = hashlib.md5(raw_bytes).hexdigest()
+                    collection.upsert(
+                        ids=[f"material_{course_id}_{file_id}_chunk_{i}" for i in range(len(chunks))],
+                        documents=chunks,
+                        embeddings=vectors,
+                        metadatas=[{"source": title, "course_id": str(course_id), "material_type": "user-upload", "chunk_index": i, "topic_id": str(file_id)} for i in range(len(chunks))],
+                    )
+                    manifest[title] = {"topic_id": file_id, "content_hash": content_hash, "chunk_count": len(chunks), "embedded_at": datetime.now(timezone.utc).isoformat()}
+                    existing_embedded.append(title)
+                    new_names.append(title)
+                    print(f"  [embedded] Local file '{title}' -- {len(chunks)} chunks")
+                except Exception as e:
+                    print(f"  [error] Failed to embed local file '{title}': {e}")
+
             if course_id and manifest:
                 save_manifest(course_id, manifest)
 
@@ -213,6 +261,7 @@ def material_fetcher(state: GraphState) -> dict:
             return {
                 "embedded_materials": existing_embedded,
                 "materials_metadata": manifest,
+                "inaccessible_topics": [],
                 "pipeline_log": log_step(state, "material_fetcher", "done", detail, elapsed),
             }
         except Exception as e:
@@ -220,13 +269,14 @@ def material_fetcher(state: GraphState) -> dict:
             return {
                 "embedded_materials": list(state.get("embedded_materials") or []),
                 "materials_metadata": {},
+                "inaccessible_topics": [],
                 "pipeline_log": log_step(state, "material_fetcher", "error", str(e), time.time() - t0),
             }
 
     references = state.get("material_references") or []
     if not references and not user_topics:
         print("[material_fetcher] No material references to fetch")
-        return {"embedded_materials": [], "materials_metadata": {}, "pipeline_log": log_step(state, "material_fetcher", "done", "no references", time.time() - t0)}
+        return {"embedded_materials": [], "materials_metadata": {}, "inaccessible_topics": [], "pipeline_log": log_step(state, "material_fetcher", "done", "no references", time.time() - t0)}
 
     try:
         # Step 1: Get content catalog from Brightspace
@@ -234,21 +284,33 @@ def material_fetcher(state: GraphState) -> dict:
         catalog = get_content_catalog(org_unit_id, bs_token)
         if not catalog:
             print("[material_fetcher] Empty content catalog -- token may be expired or user lacks access.")
-            return {"embedded_materials": [], "materials_metadata": {}, "pipeline_log": log_step(state, "material_fetcher", "warning", "api returned no content", time.time() - t0)}
+            return {"embedded_materials": [], "materials_metadata": {}, "inaccessible_topics": [], "pipeline_log": log_step(state, "material_fetcher", "warning", "api returned no content", time.time() - t0)}
 
-        # Filter to downloadable files only (TopicType 1)
-        downloadable = [item for item in catalog if item.get("topic_type") == 1]
-        print(f"[material_fetcher] {len(downloadable)} downloadable files in catalog")
+        downloadable_count = sum(1 for item in catalog if item.get("topic_type") == 1)
+        link_count = sum(1 for item in catalog if item.get("topic_type") == 3)
+        print(f"[material_fetcher] {downloadable_count} downloadable + {link_count} link topics in catalog")
 
-        # Step 2: Fuzzy match references against catalog
+        # Step 2: Fuzzy match references against full catalog (including links)
         print(f"[material_fetcher] Fuzzy matching {len(references)} references...")
-        matched = _fuzzy_match(references, downloadable)
+        matched = _fuzzy_match(references, catalog)
         seen_ids = {m["id"] for m in matched}
 
         # Process user-selected topics (manual picks)
+        local_file_topics = []  # Topics with path key (replaced link uploads)
         for topic in user_topics:
             topic_id = topic.get("id")
             title = topic.get("title", f"topic_{topic_id}")
+
+            # If topic has a path, it's a local file (user replaced an external link)
+            if topic.get("path"):
+                local_file_topics.append({
+                    "file_id": str(topic_id),
+                    "file_name": topic.get("file_name") or title,
+                    "path": topic["path"],
+                })
+                print(f"  [user-selected local] '{title}' (path={topic['path']})")
+                continue
+
             if topic_id and topic_id not in seen_ids:
                 matched.append({
                     "id": topic_id, "title": title, "topic_type": 1,
@@ -258,9 +320,24 @@ def material_fetcher(state: GraphState) -> dict:
                 seen_ids.add(topic_id)
                 print(f"  [user-selected] '{title}' (topic_id={topic_id})")
 
-        if not matched:
+        # Separate link topics (inaccessible) from downloadable ones
+        inaccessible_topics = []
+        downloadable_matched = []
+        for item in matched:
+            if item.get("topic_type") == 3:
+                inaccessible_topics.append({
+                    "id": item["id"],
+                    "title": item["title"],
+                    "url": item.get("url", ""),
+                })
+                print(f"  [link] '{item['title']}' is an external link -- marking inaccessible")
+            else:
+                downloadable_matched.append(item)
+        matched = downloadable_matched
+
+        if not matched and not local_file_topics:
             print("[material_fetcher] No materials matched above threshold")
-            return {"embedded_materials": [], "materials_metadata": {}, "pipeline_log": log_step(state, "material_fetcher", "done", "0 matched", time.time() - t0)}
+            return {"embedded_materials": [], "materials_metadata": {}, "inaccessible_topics": inaccessible_topics, "pipeline_log": log_step(state, "material_fetcher", "done", "0 matched", time.time() - t0)}
 
         # Step 3: Check Chroma + manifest for dedup
         collection = get_course_materials_collection(course_id) if course_id else None
@@ -290,18 +367,13 @@ def material_fetcher(state: GraphState) -> dict:
 
             to_embed.append(item)
 
-        if not to_embed:
-            print("[material_fetcher] All matched materials already embedded")
-            return {
-                "embedded_materials": [m["title"] for m in matched],
-                "materials_metadata": manifest,
-                "pipeline_log": log_step(state, "material_fetcher", "done", f"all {len(matched)} cached", time.time() - t0)
-            }
-
         # Step 4+5: Download, extract, chunk, embed
         splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         embeddings_model = _get_embeddings()
         embedded_names = []
+
+        if not to_embed:
+            print("[material_fetcher] All matched Brightspace materials already embedded")
 
         for item in to_embed:
             topic_id = item["id"]
@@ -350,17 +422,73 @@ def material_fetcher(state: GraphState) -> dict:
                 except Exception as e:
                     print(f"  [error] Failed to embed '{title}': {e}")
 
-        # Step 6: Save manifest
+        # Step 6: Process supplementary uploaded files (from pdf_parser) + local file topics
+        supp_uploads = (state.get("supplementary_uploads") or []) + local_file_topics
+        for upload in supp_uploads:
+            path = upload.get("path", "")
+            title = upload.get("file_name", "uploaded_file")
+            file_id = upload.get("file_id", title)
+
+            if title in manifest:
+                print(f"  [skip] Supplementary '{title}' already in manifest")
+                if title not in embedded_names:
+                    embedded_names.append(title)
+                continue
+
+            try:
+                with open(path, "rb") as fh:
+                    raw_bytes = fh.read()
+                text = extract_text_from_bytes(raw_bytes)
+                if len(text.strip()) < 100:
+                    text = extract_text_with_ocr_bytes(raw_bytes)
+                if not text:
+                    print(f"  [skip] Could not extract text from supplementary '{title}'")
+                    continue
+
+                chunks = splitter.split_text(text)
+                if not chunks or not collection:
+                    continue
+
+                vectors = embeddings_model.embed_documents(chunks)
+                content_hash = hashlib.md5(raw_bytes).hexdigest()
+                collection.upsert(
+                    ids=[f"material_{course_id}_{file_id}_chunk_{i}" for i in range(len(chunks))],
+                    documents=chunks,
+                    embeddings=vectors,
+                    metadatas=[{
+                        "source": title,
+                        "course_id": str(course_id),
+                        "material_type": "user-upload",
+                        "chunk_index": i,
+                        "topic_id": str(file_id),
+                    } for i in range(len(chunks))],
+                )
+                manifest[title] = {
+                    "topic_id": file_id,
+                    "content_hash": content_hash,
+                    "chunk_count": len(chunks),
+                    "embedded_at": datetime.now(timezone.utc).isoformat(),
+                }
+                embedded_names.append(title)
+                print(f"  [embedded] Supplementary '{title}' -- {len(chunks)} chunks")
+            except Exception as e:
+                print(f"  [error] Failed to embed supplementary '{title}': {e}")
+
+        # Step 7: Save manifest
         if course_id and manifest:
             save_manifest(course_id, manifest)
 
-        all_embedded = [m["title"] for m in matched if m["title"] in manifest]
+        all_embedded = [m["title"] for m in matched if m["title"] in manifest] + [
+            u.get("file_name", "") for u in supp_uploads if u.get("file_name", "") in manifest
+        ]
+        all_embedded = list(dict.fromkeys(all_embedded))  # dedup preserving order
         elapsed = time.time() - t0
         print(f"[material_fetcher] Done in {elapsed:.1f}s — {len(embedded_names)} new, {len(all_embedded)} total embedded")
 
         return {
             "embedded_materials": all_embedded,
             "materials_metadata": manifest,
+            "inaccessible_topics": inaccessible_topics,
             "pipeline_log": log_step(state, "material_fetcher", "done", f"{len(embedded_names)} new embedded", elapsed)
         }
 
@@ -369,5 +497,6 @@ def material_fetcher(state: GraphState) -> dict:
         return {
             "embedded_materials": [],
             "materials_metadata": {},
+            "inaccessible_topics": [],
             "pipeline_log": log_step(state, "material_fetcher", "error", str(e), time.time() - t0)
         }
