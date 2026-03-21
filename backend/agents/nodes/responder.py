@@ -208,7 +208,7 @@ def responder(state: GraphState) -> dict:
     t0 = time.time()
     
     queries = state.get("retrieval_queries", [])
-    course_id = state.get("course_id")
+    course_id = state.get("effective_course_id") or state.get("course_id")
     assignment_id = state.get("assignment_id")
     context_mode = state.get("context_mode", "inject")
     user_prompt = state.get("user_prompt", "")

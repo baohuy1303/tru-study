@@ -136,15 +136,20 @@ export default function ChatArea({
   }, [selectedTask?.task_id, selectedTask?.org_unit_id, selectedTask?.type]);
 
   const handleClearChat = async () => {
-    if (!selectedTask) return;
     try {
-      await api.delete(`/sessions/${selectedTask.org_unit_id}/${selectedTask.task_id}`);
-    } catch (err) {
-      console.error("Failed to clear session", err);
+      if (sessionId) {
+        await api.delete(`/sessions/id/${sessionId}`);
+      } else if (selectedTask) {
+        await api.delete(`/sessions/0/${selectedTask.task_id}`); // fallback if very old session
+      }
+      setMessages([]);
+      setSessionId(null);
+      if (selectedTask) {
+        localStorage.removeItem(`chat_${selectedTask.task_id}`);
+      }
+    } catch (e) {
+      console.error("Failed to clear backend session", e);
     }
-    localStorage.removeItem(`chat_${selectedTask.task_id}`);
-    setMessages([]);
-    setSessionId(null);
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -269,7 +274,8 @@ export default function ChatArea({
         })) || [],
         selected_topic_ids: selectedTopics,
         uploaded_files: uploadedFiles,
-        chat_history: messages.map(m => ({ role: m.role, content: m.content }))
+        chat_history: messages.map(m => ({ role: m.role, content: m.content })),
+        session_id: sessionId
       };
 
       const token = localStorage.getItem('bs_token');
@@ -436,7 +442,7 @@ export default function ChatArea({
                   <label className="inline-flex items-center gap-2 px-4 py-2 bg-amber-100 dark:bg-amber-800/40 hover:bg-amber-200 dark:hover:bg-amber-700/50 text-amber-800 dark:text-amber-200 rounded-xl text-sm font-semibold cursor-pointer transition-colors border border-amber-200 dark:border-amber-700">
                     <Paperclip size={14} strokeWidth={2.5} />
                     Upload assignment file
-                    <input type="file" className="hidden" accept=".pdf,.doc,.docx,.txt,.pptx,.ppt" onChange={handleFileUpload} />
+                    <input type="file" className="hidden" accept=".pdf,.doc,.docx,.txt,.pptx,.ppt,.mp4,.mov,.webm,.mkv,.avi" onChange={handleFileUpload} />
                   </label>
                 </div>
               )}
@@ -501,7 +507,7 @@ export default function ChatArea({
                     <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-100 dark:bg-blue-800/40 hover:bg-blue-200 dark:hover:bg-blue-700/50 text-blue-800 dark:text-blue-200 rounded-lg text-xs font-semibold cursor-pointer transition-colors shrink-0 border border-blue-200 dark:border-blue-700">
                       {uploadingForTopic === topic.id ? <Loader2 size={12} className="animate-spin" /> : <Paperclip size={12} strokeWidth={2.5} />}
                       Upload
-                      <input type="file" className="hidden" accept=".pdf,.doc,.docx,.txt,.pptx,.ppt"
+                      <input type="file" className="hidden" accept=".pdf,.doc,.docx,.txt,.pptx,.ppt,.mp4,.mov,.webm,.mkv,.avi"
                              onChange={(e) => handleUploadForTopic(e, topic)}
                              disabled={uploadingForTopic === topic.id} />
                     </label>
@@ -520,7 +526,7 @@ export default function ChatArea({
                 <AlertTriangle size={18} className="text-orange-600 dark:text-orange-400 shrink-0 mt-0.5" strokeWidth={2.5} />
                 <div>
                   <p className="text-sm font-bold text-orange-800 dark:text-orange-200 mb-1">
-                    Some video materials are too long to transcribe
+                    Some video materials couldn't be transcribed
                   </p>
                   <p className="text-sm text-orange-700 dark:text-orange-300 mb-3">
                     Videos over 10 minutes cannot be transcribed in the current plan. Shorter videos are transcribed automatically when selected.
@@ -530,7 +536,11 @@ export default function ChatArea({
                       <div key={v.id} className="flex items-center gap-2 text-sm text-orange-700 dark:text-orange-300">
                         <Video size={14} className="shrink-0" />
                         <span className="font-medium truncate">{v.title}</span>
-                        <span className="text-xs opacity-70">~{v.duration_estimate_min} min</span>
+                        <span className="text-xs opacity-70">
+                          {v.reason === 'transcription_failed'
+                            ? 'Transcription failed'
+                            : `~${v.duration_estimate_min} min`}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -684,7 +694,7 @@ export default function ChatArea({
                   ref={fileInputRef}
                   type="file"
                   className="hidden"
-                  accept=".pdf,.doc,.docx,.txt,.pptx,.ppt"
+                  accept=".pdf,.doc,.docx,.txt,.pptx,.ppt,.mp4,.mov,.webm,.mkv,.avi"
                   onChange={handleFileUpload}
                   disabled={isUploading}
                 />

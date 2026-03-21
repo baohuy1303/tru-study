@@ -47,6 +47,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
         const entry: any = { id: topic.id, title: topic.title };
         if (topic.path) entry.path = topic.path;
         if (topic.file_name) entry.file_name = topic.file_name;
+        if (topic.orgUnitId) entry.orgUnitId = topic.orgUnitId;
         next.set(topic.id, entry);
       } else {
         next.delete(topic.id);

@@ -46,14 +46,14 @@ function TreeNode({
     // Replaced link topic — toggle like a selectable topic, enriched with path
     if (isLinkTopic && replacedLink) {
       if (onTopicToggle) {
-        onTopicToggle({ ...node, path: replacedLink.path, file_name: replacedLink.file_name }, !isChecked);
+        onTopicToggle({ ...node, path: replacedLink.path, file_name: replacedLink.file_name, orgUnitId }, !isChecked);
       }
       return;
     }
 
     if (!isModule) {
       if (isSelectableTopic && onTopicToggle) {
-        onTopicToggle(node, !isChecked);
+        onTopicToggle({ ...node, orgUnitId }, !isChecked);
       }
       return;
     }
@@ -136,7 +136,7 @@ function TreeNode({
                   title="Upload local file to replace external link"
                 >
                   <Paperclip size={14} strokeWidth={2.5} />
-                  <input type="file" className="hidden" accept=".pdf,.doc,.docx,.txt,.pptx,.ppt" onChange={handleFileUpload} />
+                  <input type="file" className="hidden" accept=".pdf,.doc,.docx,.txt,.pptx,.ppt,.mp4,.mov,.webm,.mkv,.avi" onChange={handleFileUpload} />
                 </label>
               )}
             </>

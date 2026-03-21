@@ -30,6 +30,7 @@ class GraphState(TypedDict, total=False):
     # ── Material fetching ────────────────────────────────────────────────────
     embedded_materials: list[str]     # Filenames of embedded materials
     materials_metadata: dict          # Manifest data
+    effective_course_id: int          # Resolved course_id (may differ from course_id in freeform mode)
 
     # ── Retrieval ────────────────────────────────────────────────────────────
     retrieval_queries: list[str]

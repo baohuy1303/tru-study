@@ -9,8 +9,8 @@ VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v", ".wmv", ".f
 WHISPER_MAX_BYTES = 25 * 1024 * 1024  # 25MB
 MAX_DURATION_MINUTES = 10
 
-# Conservative estimate: ~1MB/min for compressed video audio track
-BYTES_PER_MINUTE_ESTIMATE = 1_000_000
+# Conservative estimate: ~8MB/min for typical compressed video
+BYTES_PER_MINUTE_ESTIMATE = 8_000_000
 
 
 def is_video_file(filename: str) -> bool:
@@ -19,9 +19,33 @@ def is_video_file(filename: str) -> bool:
     return ext in VIDEO_EXTENSIONS
 
 
+def detect_video(content_type: str, filename: str) -> bool:
+    """Check if a downloaded file is a video by content-type or filename extension.
+    Brightspace often returns application/octet-stream for all files,
+    so we also check the filename."""
+    if "video/" in content_type:
+        return True
+    if is_video_file(filename):
+        return True
+    return False
+
+
 def estimate_duration_minutes(size_bytes: int) -> float:
-    """Rough duration estimate from file size. Intentionally conservative."""
+    """Rough duration estimate from file size. Fallback when ffmpeg unavailable."""
     return size_bytes / BYTES_PER_MINUTE_ESTIMATE
+
+
+def get_duration_minutes(file_path: str) -> float | None:
+    """Get actual duration using pydub/ffprobe. Returns None if ffmpeg unavailable."""
+    try:
+        from pydub.utils import mediainfo
+        info = mediainfo(file_path)
+        duration_s = float(info.get("duration", 0))
+        if duration_s > 0:
+            return duration_s / 60.0
+    except Exception:
+        pass
+    return None
 
 
 def extract_audio(video_path: str) -> str | None:

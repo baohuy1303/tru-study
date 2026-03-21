@@ -19,7 +19,7 @@ from utils.brightspace import get_content_catalog, BS_BASE, LE_VER
 from utils.chroma import get_course_materials_collection
 from utils.manifest import load_manifest, save_manifest
 from utils.pdf import extract_text_from_bytes, extract_text_with_ocr_bytes
-from utils.video import is_video_file, estimate_duration_minutes, transcribe_video, MAX_DURATION_MINUTES
+from utils.video import is_video_file, detect_video, estimate_duration_minutes, get_duration_minutes, transcribe_video, MAX_DURATION_MINUTES
 
 load_dotenv()
 
@@ -87,12 +87,12 @@ def _fuzzy_match(references: list[dict], catalog: list[dict]) -> list[dict]:
     return matched
 
 
-def _download_and_extract(topic_id: int, org_unit_id: int, bs_token: str) -> tuple[bytes, str]:
+def _download_and_extract(topic_id: int, org_unit_id: int, bs_token: str, title: str = "", timeout: int = 30) -> tuple[bytes, str]:
     """Download a file from Brightspace and extract text. Returns (raw_bytes, extracted_text)."""
     with httpx.Client(
         base_url=BS_BASE,
         headers={"Authorization": f"Bearer {bs_token}"},
-        timeout=30,
+        timeout=timeout,
         follow_redirects=True,
     ) as client:
         resp = client.get(f"/d2l/api/le/{LE_VER}/{org_unit_id}/content/topics/{topic_id}/file")
@@ -103,8 +103,8 @@ def _download_and_extract(topic_id: int, org_unit_id: int, bs_token: str) -> tup
         raw = resp.content
         content_type = resp.headers.get("content-type", "")
 
-        # Video file — return raw bytes with marker for caller to handle
-        if "video/" in content_type:
+        # Video file — check content-type AND filename extension
+        if detect_video(content_type, title):
             return raw, "__VIDEO__"
 
         # Try PDF extraction first
@@ -147,17 +147,25 @@ def material_fetcher(state: GraphState) -> dict:
     bs_token = state.get("bs_token", "")
     course_id = state.get("course_id")
 
-    if not org_unit_id or not bs_token:
-        print("[material_fetcher] Missing org_unit_id or bs_token, skipping")
-        return {"embedded_materials": [], "materials_metadata": {}, "inaccessible_topics": [], "too_long_videos": [], "pipeline_log": log_step(state, "material_fetcher", "error", "missing org_unit_id or token", time.time() - t0)}
+    if not bs_token:
+        print("[material_fetcher] Missing bs_token, skipping")
+        return {"embedded_materials": [], "materials_metadata": {}, "inaccessible_topics": [], "too_long_videos": [], "effective_course_id": 0, "pipeline_log": log_step(state, "material_fetcher", "error", "missing token", time.time() - t0)}
+
+    # In freeform mode org_unit_id may be 0, but topics carry their own orgUnitId
+    has_topics_with_org = any(t.get("orgUnitId") for t in user_topics)
+    if not org_unit_id and not has_topics_with_org:
+        print("[material_fetcher] Missing org_unit_id and no topics with orgUnitId, skipping")
+        return {"embedded_materials": [], "materials_metadata": {}, "inaccessible_topics": [], "too_long_videos": [], "effective_course_id": 0, "pipeline_log": log_step(state, "material_fetcher", "error", "missing org_unit_id", time.time() - t0)}
 
     # If cached but user added new topics: skip catalog fetch + fuzzy match, only process user selections
     if state.get("embedded_materials") is not None and user_topics:
         print(f"[material_fetcher] Cache hit but {len(user_topics)} user-selected topic(s) need processing")
         try:
             existing_embedded = list(state["embedded_materials"])
-            collection = get_course_materials_collection(course_id) if course_id else None
-            manifest = load_manifest(course_id) if course_id else {}
+            # In freeform mode, use first topic's orgUnitId as fallback for collection/manifest
+            effective_course_id = course_id or next((t.get("orgUnitId") for t in user_topics if t.get("orgUnitId")), 0)
+            collection = get_course_materials_collection(effective_course_id) if effective_course_id else None
+            manifest = load_manifest(effective_course_id) if effective_course_id else {}
             splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
             embeddings_model = _get_embeddings()
             new_names = []
@@ -180,7 +188,7 @@ def material_fetcher(state: GraphState) -> dict:
                     })
                     continue
 
-                if collection and _is_already_in_chroma(collection, topic_id, course_id):
+                if collection and _is_already_in_chroma(collection, topic_id, effective_course_id):
                     print(f"  [skip] '{title}' already in Chroma")
                     if title not in manifest:
                         manifest[title] = {"topic_id": topic_id, "chunk_count": "?", "embedded_at": "pre-existing"}
@@ -194,26 +202,32 @@ def material_fetcher(state: GraphState) -> dict:
                         existing_embedded.append(title)
                     continue
 
-                print(f"  [download] '{title}' (topic_id={topic_id})...")
-                raw_bytes, text = _download_and_extract(topic_id, org_unit_id, bs_token)
+                topic_org_id = topic.get("orgUnitId") or org_unit_id
+                dl_timeout = 120 if is_video_file(title) else 30
+                print(f"  [download] '{title}' (topic_id={topic_id}, org={topic_org_id})...")
+                raw_bytes, text = _download_and_extract(topic_id, topic_org_id, bs_token, title, timeout=dl_timeout)
 
                 # Handle video files
                 if text == "__VIDEO__":
                     import tempfile
-                    duration_est = estimate_duration_minutes(len(raw_bytes))
-                    if duration_est > MAX_DURATION_MINUTES:
-                        cached_too_long.append({"id": topic_id, "title": title, "duration_estimate_min": round(duration_est, 1)})
-                        print(f"  [skip] Video '{title}' estimated {duration_est:.1f}min (>{MAX_DURATION_MINUTES}min limit)")
-                        continue
                     file_ext = os.path.splitext(title)[1] or ".mp4"
                     with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as tmp:
                         tmp.write(raw_bytes)
                         tmp_path = tmp.name
                     try:
+                        actual_dur = get_duration_minutes(tmp_path)
+                        duration_est = actual_dur if actual_dur is not None else estimate_duration_minutes(len(raw_bytes))
+                        print(f"  [video] '{title}' duration: {duration_est:.1f}min {'(actual)' if actual_dur else '(estimate)'}")
+                        if duration_est > MAX_DURATION_MINUTES:
+                            cached_too_long.append({"id": topic_id, "title": title, "duration_estimate_min": round(duration_est, 1)})
+                            print(f"  [skip] Video '{title}' {duration_est:.1f}min (>{MAX_DURATION_MINUTES}min limit)")
+                            continue
                         text = transcribe_video(tmp_path)
                     finally:
-                        os.unlink(tmp_path)
+                        if os.path.exists(tmp_path):
+                            os.unlink(tmp_path)
                     if not text:
+                        cached_too_long.append({"id": topic_id, "title": title, "duration_estimate_min": round(duration_est, 1), "reason": "transcription_failed"})
                         print(f"  [skip] Could not transcribe video '{title}'")
                         continue
                     print(f"  [transcribed] Video '{title}' -- {len(text)} chars")
@@ -231,10 +245,10 @@ def material_fetcher(state: GraphState) -> dict:
                         vectors = embeddings_model.embed_documents(chunks)
                         content_hash = hashlib.md5(raw_bytes).hexdigest()
                         collection.upsert(
-                            ids=[f"material_{course_id}_{topic_id}_chunk_{i}" for i in range(len(chunks))],
+                            ids=[f"material_{effective_course_id}_{topic_id}_chunk_{i}" for i in range(len(chunks))],
                             documents=chunks,
                             embeddings=vectors,
-                            metadatas=[{"source": title, "course_id": str(course_id), "material_type": "user-selected", "chunk_index": i, "topic_id": str(topic_id)} for i in range(len(chunks))],
+                            metadatas=[{"source": title, "course_id": str(effective_course_id), "material_type": "user-selected", "chunk_index": i, "topic_id": str(topic_id)} for i in range(len(chunks))],
                         )
                         manifest[title] = {"topic_id": topic_id, "content_hash": content_hash, "chunk_count": len(chunks), "embedded_at": datetime.now(timezone.utc).isoformat()}
                         existing_embedded.append(title)
@@ -254,11 +268,28 @@ def material_fetcher(state: GraphState) -> dict:
                         existing_embedded.append(title)
                     continue
                 try:
-                    with open(path, "rb") as fh:
-                        raw_bytes = fh.read()
-                    text = extract_text_from_bytes(raw_bytes)
-                    if len(text.strip()) < 100:
-                        text = extract_text_with_ocr_bytes(raw_bytes)
+                    if is_video_file(title):
+                        size_bytes = os.path.getsize(path)
+                        actual_dur = get_duration_minutes(path)
+                        duration = actual_dur if actual_dur is not None else estimate_duration_minutes(size_bytes)
+                        if duration > MAX_DURATION_MINUTES:
+                            cached_too_long.append({"id": file_id, "title": title, "duration_estimate_min": round(duration, 1), "reason": "too_long"})
+                            print(f"  [skip] Local video '{title}' {duration:.1f}min (>{MAX_DURATION_MINUTES}min limit)")
+                            continue
+                        text = transcribe_video(path)
+                        if not text:
+                            cached_too_long.append({"id": file_id, "title": title, "duration_estimate_min": round(duration, 1), "reason": "transcription_failed"})
+                            print(f"  [skip] Could not transcribe local video '{title}'")
+                            continue
+                        print(f"  [transcribed] Local video '{title}' -- {len(text)} chars")
+                        with open(path, "rb") as fh:
+                            raw_bytes = fh.read()
+                    else:
+                        with open(path, "rb") as fh:
+                            raw_bytes = fh.read()
+                        text = extract_text_from_bytes(raw_bytes)
+                        if len(text.strip()) < 100:
+                            text = extract_text_with_ocr_bytes(raw_bytes)
                     if not text:
                         print(f"  [skip] Could not extract text from local file '{title}'")
                         continue
@@ -268,10 +299,10 @@ def material_fetcher(state: GraphState) -> dict:
                     vectors = embeddings_model.embed_documents(chunks)
                     content_hash = hashlib.md5(raw_bytes).hexdigest()
                     collection.upsert(
-                        ids=[f"material_{course_id}_{file_id}_chunk_{i}" for i in range(len(chunks))],
+                        ids=[f"material_{effective_course_id}_{file_id}_chunk_{i}" for i in range(len(chunks))],
                         documents=chunks,
                         embeddings=vectors,
-                        metadatas=[{"source": title, "course_id": str(course_id), "material_type": "user-upload", "chunk_index": i, "topic_id": str(file_id)} for i in range(len(chunks))],
+                        metadatas=[{"source": title, "course_id": str(effective_course_id), "material_type": "user-upload", "chunk_index": i, "topic_id": str(file_id)} for i in range(len(chunks))],
                     )
                     manifest[title] = {"topic_id": file_id, "content_hash": content_hash, "chunk_count": len(chunks), "embedded_at": datetime.now(timezone.utc).isoformat()}
                     existing_embedded.append(title)
@@ -280,8 +311,8 @@ def material_fetcher(state: GraphState) -> dict:
                 except Exception as e:
                     print(f"  [error] Failed to embed local file '{title}': {e}")
 
-            if course_id and manifest:
-                save_manifest(course_id, manifest)
+            if effective_course_id and manifest:
+                save_manifest(effective_course_id, manifest)
 
             elapsed = time.time() - t0
             detail = f"{len(new_names)} new user-selected embedded" if new_names else "all user-selected already cached"
@@ -291,6 +322,7 @@ def material_fetcher(state: GraphState) -> dict:
                 "materials_metadata": manifest,
                 "inaccessible_topics": [],
                 "too_long_videos": cached_too_long,
+                "effective_course_id": effective_course_id,
                 "pipeline_log": log_step(state, "material_fetcher", "done", detail, elapsed),
             }
         except Exception as e:
@@ -300,21 +332,31 @@ def material_fetcher(state: GraphState) -> dict:
                 "materials_metadata": {},
                 "inaccessible_topics": [],
                 "too_long_videos": [],
+                "effective_course_id": effective_course_id,
                 "pipeline_log": log_step(state, "material_fetcher", "error", str(e), time.time() - t0),
             }
 
     references = state.get("material_references") or []
     if not references and not user_topics:
         print("[material_fetcher] No material references to fetch")
-        return {"embedded_materials": [], "materials_metadata": {}, "inaccessible_topics": [], "too_long_videos": [], "pipeline_log": log_step(state, "material_fetcher", "done", "no references", time.time() - t0)}
+        return {"embedded_materials": [], "materials_metadata": {}, "inaccessible_topics": [], "too_long_videos": [], "effective_course_id": 0, "pipeline_log": log_step(state, "material_fetcher", "done", "no references", time.time() - t0)}
+
+    # In freeform mode, use first topic's orgUnitId as fallback
+    effective_course_id = course_id or next((t.get("orgUnitId") for t in user_topics if t.get("orgUnitId")), 0)
+    effective_org_unit_id = org_unit_id or effective_course_id
 
     try:
-        # Step 1: Get content catalog from Brightspace
-        print(f"[material_fetcher] Walking content tree for org_unit {org_unit_id}...")
-        catalog = get_content_catalog(org_unit_id, bs_token)
-        if not catalog:
-            print("[material_fetcher] Empty content catalog -- token may be expired or user lacks access.")
-            return {"embedded_materials": [], "materials_metadata": {}, "inaccessible_topics": [], "too_long_videos": [], "pipeline_log": log_step(state, "material_fetcher", "warning", "api returned no content", time.time() - t0)}
+        # Step 1: Get content catalog from Brightspace (skip in freeform with no global org_unit_id)
+        catalog = []
+        if org_unit_id:
+            print(f"[material_fetcher] Walking content tree for org_unit {org_unit_id}...")
+            catalog = get_content_catalog(org_unit_id, bs_token)
+            if not catalog and not user_topics:
+                print("[material_fetcher] Empty content catalog -- token may be expired or user lacks access.")
+                return {"embedded_materials": [], "materials_metadata": {}, "inaccessible_topics": [], "too_long_videos": [], "effective_course_id": effective_course_id, "pipeline_log": log_step(state, "material_fetcher", "warning", "api returned no content", time.time() - t0)}
+        elif not user_topics:
+            print("[material_fetcher] No org_unit_id and no user topics, skipping")
+            return {"embedded_materials": [], "materials_metadata": {}, "inaccessible_topics": [], "too_long_videos": [], "effective_course_id": 0, "pipeline_log": log_step(state, "material_fetcher", "done", "freeform, no topics", time.time() - t0)}
 
         downloadable_count = sum(1 for item in catalog if item.get("topic_type") == 1)
         link_count = sum(1 for item in catalog if item.get("topic_type") == 3)
@@ -346,9 +388,10 @@ def material_fetcher(state: GraphState) -> dict:
                     "id": topic_id, "title": title, "topic_type": 1,
                     "url": None, "module_path": "user-selected",
                     "match_score": 100, "matched_ref": f"[user-selected] {title}",
+                    "orgUnitId": topic.get("orgUnitId"),
                 })
                 seen_ids.add(topic_id)
-                print(f"  [user-selected] '{title}' (topic_id={topic_id})")
+                print(f"  [user-selected] '{title}' (topic_id={topic_id}, org={topic.get('orgUnitId') or org_unit_id})")
 
         # Separate link topics (inaccessible) from downloadable ones
         inaccessible_topics = []
@@ -367,11 +410,11 @@ def material_fetcher(state: GraphState) -> dict:
 
         if not matched and not local_file_topics:
             print("[material_fetcher] No materials matched above threshold")
-            return {"embedded_materials": [], "materials_metadata": {}, "inaccessible_topics": inaccessible_topics, "too_long_videos": [], "pipeline_log": log_step(state, "material_fetcher", "done", "0 matched", time.time() - t0)}
+            return {"embedded_materials": [], "materials_metadata": {}, "inaccessible_topics": inaccessible_topics, "too_long_videos": [], "effective_course_id": effective_course_id, "pipeline_log": log_step(state, "material_fetcher", "done", "0 matched", time.time() - t0)}
 
         # Step 3: Check Chroma + manifest for dedup
-        collection = get_course_materials_collection(course_id) if course_id else None
-        manifest = load_manifest(course_id) if course_id else {}
+        collection = get_course_materials_collection(effective_course_id) if effective_course_id else None
+        manifest = load_manifest(effective_course_id) if effective_course_id else {}
         to_embed = []
 
         for item in matched:
@@ -379,7 +422,7 @@ def material_fetcher(state: GraphState) -> dict:
             title = item["title"]
 
             # Check Chroma first — if chunks already exist for this topic, skip
-            if collection and _is_already_in_chroma(collection, topic_id, course_id):
+            if collection and _is_already_in_chroma(collection, topic_id, effective_course_id):
                 print(f"  [skip] '{title}' already in Chroma (topic_id={topic_id})")
                 # Ensure manifest is in sync
                 if title not in manifest:
@@ -409,27 +452,33 @@ def material_fetcher(state: GraphState) -> dict:
         for item in to_embed:
             topic_id = item["id"]
             title = item["title"]
-            print(f"  [download] '{title}' (topic_id={topic_id})...")
+            item_org_id = item.get("orgUnitId") or org_unit_id
+            dl_timeout = 120 if is_video_file(title) else 30
+            print(f"  [download] '{title}' (topic_id={topic_id}, org={item_org_id})...")
 
-            raw_bytes, text = _download_and_extract(topic_id, org_unit_id, bs_token)
+            raw_bytes, text = _download_and_extract(topic_id, item_org_id, bs_token, title, timeout=dl_timeout)
 
             # Handle video files
             if text == "__VIDEO__":
                 import tempfile
-                duration_est = estimate_duration_minutes(len(raw_bytes))
-                if duration_est > MAX_DURATION_MINUTES:
-                    too_long_videos.append({"id": topic_id, "title": title, "duration_estimate_min": round(duration_est, 1)})
-                    print(f"  [skip] Video '{title}' estimated {duration_est:.1f}min (>{MAX_DURATION_MINUTES}min limit)")
-                    continue
                 file_ext = item.get("file_extension") or os.path.splitext(title)[1] or ".mp4"
                 with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as tmp:
                     tmp.write(raw_bytes)
                     tmp_path = tmp.name
                 try:
+                    actual_dur = get_duration_minutes(tmp_path)
+                    duration_est = actual_dur if actual_dur is not None else estimate_duration_minutes(len(raw_bytes))
+                    print(f"  [video] '{title}' duration: {duration_est:.1f}min {'(actual)' if actual_dur else '(estimate)'}")
+                    if duration_est > MAX_DURATION_MINUTES:
+                        too_long_videos.append({"id": topic_id, "title": title, "duration_estimate_min": round(duration_est, 1)})
+                        print(f"  [skip] Video '{title}' {duration_est:.1f}min (>{MAX_DURATION_MINUTES}min limit)")
+                        continue
                     text = transcribe_video(tmp_path)
                 finally:
-                    os.unlink(tmp_path)
+                    if os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
                 if not text:
+                    too_long_videos.append({"id": topic_id, "title": title, "duration_estimate_min": round(duration_est, 1), "reason": "transcription_failed"})
                     print(f"  [skip] Could not transcribe video '{title}'")
                     continue
                 print(f"  [transcribed] Video '{title}' -- {len(text)} chars")
@@ -448,13 +497,13 @@ def material_fetcher(state: GraphState) -> dict:
                     content_hash = hashlib.md5(raw_bytes).hexdigest()
 
                     collection.upsert(
-                        ids=[f"material_{course_id}_{topic_id}_chunk_{i}" for i in range(len(chunks))],
+                        ids=[f"material_{effective_course_id}_{topic_id}_chunk_{i}" for i in range(len(chunks))],
                         documents=chunks,
                         embeddings=vectors,
                         metadatas=[
                             {
                                 "source": title,
-                                "course_id": str(course_id),
+                                "course_id": str(effective_course_id),
                                 "material_type": item.get("matched_ref", "other"),
                                 "chunk_index": i,
                                 "topic_id": str(topic_id),
@@ -489,11 +538,29 @@ def material_fetcher(state: GraphState) -> dict:
                 continue
 
             try:
-                with open(path, "rb") as fh:
-                    raw_bytes = fh.read()
-                text = extract_text_from_bytes(raw_bytes)
-                if len(text.strip()) < 100:
-                    text = extract_text_with_ocr_bytes(raw_bytes)
+                if is_video_file(title):
+                    size_bytes = os.path.getsize(path)
+                    actual_dur = get_duration_minutes(path)
+                    duration = actual_dur if actual_dur is not None else estimate_duration_minutes(size_bytes)
+                    if duration > MAX_DURATION_MINUTES:
+                        too_long_videos.append({"id": file_id, "title": title, "duration_estimate_min": round(duration, 1), "reason": "too_long"})
+                        print(f"  [skip] Supplementary video '{title}' estimated {duration:.1f}min (>{MAX_DURATION_MINUTES}min limit)")
+                        continue
+                    text = transcribe_video(path)
+                    if not text:
+                        too_long_videos.append({"id": file_id, "title": title, "duration_estimate_min": round(duration, 1), "reason": "transcription_failed"})
+                        print(f"  [skip] Could not transcribe video '{title}'")
+                        continue
+                    print(f"  [transcribed] Supplementary video '{title}' -- {len(text)} chars")
+                    with open(path, "rb") as fh:
+                        raw_bytes = fh.read()
+                else:
+                    with open(path, "rb") as fh:
+                        raw_bytes = fh.read()
+                    text = extract_text_from_bytes(raw_bytes)
+                    if len(text.strip()) < 100:
+                        text = extract_text_with_ocr_bytes(raw_bytes)
+                
                 if not text:
                     print(f"  [skip] Could not extract text from supplementary '{title}'")
                     continue
@@ -505,12 +572,12 @@ def material_fetcher(state: GraphState) -> dict:
                 vectors = embeddings_model.embed_documents(chunks)
                 content_hash = hashlib.md5(raw_bytes).hexdigest()
                 collection.upsert(
-                    ids=[f"material_{course_id}_{file_id}_chunk_{i}" for i in range(len(chunks))],
+                    ids=[f"material_{effective_course_id}_{file_id}_chunk_{i}" for i in range(len(chunks))],
                     documents=chunks,
                     embeddings=vectors,
                     metadatas=[{
                         "source": title,
-                        "course_id": str(course_id),
+                        "course_id": str(effective_course_id),
                         "material_type": "user-upload",
                         "chunk_index": i,
                         "topic_id": str(file_id),
@@ -528,8 +595,8 @@ def material_fetcher(state: GraphState) -> dict:
                 print(f"  [error] Failed to embed supplementary '{title}': {e}")
 
         # Step 7: Save manifest
-        if course_id and manifest:
-            save_manifest(course_id, manifest)
+        if effective_course_id and manifest:
+            save_manifest(effective_course_id, manifest)
 
         all_embedded = [m["title"] for m in matched if m["title"] in manifest] + [
             u.get("file_name", "") for u in supp_uploads if u.get("file_name", "") in manifest
@@ -543,6 +610,7 @@ def material_fetcher(state: GraphState) -> dict:
             "materials_metadata": manifest,
             "inaccessible_topics": inaccessible_topics,
             "too_long_videos": too_long_videos,
+            "effective_course_id": effective_course_id,
             "pipeline_log": log_step(state, "material_fetcher", "done", f"{len(embedded_names)} new embedded", elapsed)
         }
 
@@ -553,5 +621,6 @@ def material_fetcher(state: GraphState) -> dict:
             "materials_metadata": {},
             "inaccessible_topics": [],
             "too_long_videos": [],
+            "effective_course_id": 0,
             "pipeline_log": log_step(state, "material_fetcher", "error", str(e), time.time() - t0)
         }

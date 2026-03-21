@@ -21,6 +21,7 @@ class ChatRequest(BaseModel):
     chat_history: list[dict] = []
     selected_topic_ids: list[dict] = []  # [{"id": 123, "title": "Chapter 5.pdf"}]
     uploaded_files: list[dict] = []      # [{"file_id", "file_name", "path", "is_main": bool}]
+    session_id: str | None = None
 
 
 from fastapi.responses import StreamingResponse
@@ -31,7 +32,14 @@ async def chat_stream(body: ChatRequest, token: str = Depends(get_bs_token)):
     graph = build_graph()
 
     # Build session ID and load existing session
-    session_id = build_session_id(body.course_id, body.assignment_id)
+    session_id = body.session_id
+    if not session_id:
+        if body.assignment_id:
+            session_id = build_session_id(body.course_id, body.assignment_id)
+        else:
+            import uuid
+            session_id = f"freeform_{uuid.uuid4().hex[:8]}"
+
     session = load_session(session_id)
 
     # Start with base state from request
@@ -94,6 +102,12 @@ async def chat_stream(body: ChatRequest, token: str = Depends(get_bs_token)):
         yield f"data: {json.dumps(final_payload)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.delete("/sessions/id/{session_id}")
+async def clear_session_by_id(session_id: str):
+    delete_session(session_id)
+    return {"status": "ok"}
 
 
 @router.delete("/sessions/{course_id}/{assignment_id}")

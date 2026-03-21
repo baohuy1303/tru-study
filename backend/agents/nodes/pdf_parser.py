@@ -16,6 +16,7 @@ import httpx
 from agents.state import GraphState
 from utils.tokens import count_tokens
 from utils.pdf import extract_text_from_pdf, extract_text_from_bytes, extract_text_with_ocr, extract_text_with_ocr_bytes
+from utils.video import is_video_file, estimate_duration_minutes, get_duration_minutes, transcribe_video, MAX_DURATION_MINUTES
 from utils.pipeline_log import log_step
 
 BS_BASE = "https://learn.truman.edu"
@@ -68,14 +69,35 @@ def pdf_parser(state: GraphState) -> dict:
     main_file = next((f for f in uploaded_files if f.get("is_main")), None)
     supplementary_uploads = [f for f in uploaded_files if not f.get("is_main")]
 
+    too_long_videos = []
+
     if main_file:
         path = main_file.get("path", "")
         label = main_file.get("file_name", "uploaded_file")
+        print(label)
+        print(path)
         try:
-            extracted = _try_extract_with_ocr_fallback_path(path, label)
-            if extracted:
-                parts.append(f"--- Main Uploaded File: {label} ---\n{extracted}")
-                print(f"[pdf_parser] Main uploaded file '{label}': {len(extracted)} chars")
+            if is_video_file(label):
+                import os
+                size_bytes = os.path.getsize(path)
+                actual_dur = get_duration_minutes(path)
+                duration = actual_dur if actual_dur is not None else estimate_duration_minutes(size_bytes)
+                if duration > MAX_DURATION_MINUTES:
+                    too_long_videos.append({"id": label, "title": label, "duration_estimate_min": round(duration, 1), "reason": "too_long"})
+                    print(f"[pdf_parser] Main video '{label}' too long: {duration:.1f}min (>{MAX_DURATION_MINUTES}min)")
+                else:
+                    extracted = transcribe_video(path)
+                    if extracted:
+                        parts.append(f"--- Main Uploaded Video: {label} ---\n{extracted}")
+                        print(f"[pdf_parser] Main uploaded video '{label}': {len(extracted)} chars")
+                    else:
+                        too_long_videos.append({"id": label, "title": label, "duration_estimate_min": round(duration, 1), "reason": "transcription_failed"})
+                        print(f"[pdf_parser] Failed to transcribe video '{label}'")
+            else:
+                extracted = _try_extract_with_ocr_fallback_path(path, label)
+                if extracted:
+                    parts.append(f"--- Main Uploaded File: {label} ---\n{extracted}")
+                    print(f"[pdf_parser] Main uploaded file '{label}': {len(extracted)} chars")
         except Exception as e:
             print(f"[pdf_parser] Failed to parse main uploaded file '{label}': {e}")
 
@@ -147,6 +169,9 @@ def pdf_parser(state: GraphState) -> dict:
         "assignment_token_count": token_count,
         "pipeline_log": log_step(state, "pdf_parser", "done", f"{token_count} tokens extracted", elapsed),
     }
+
+    if too_long_videos:
+        result["too_long_videos"] = state.get("too_long_videos", []) + too_long_videos
 
     # Pass supplementary uploads forward for material_fetcher
     if supplementary_uploads:
