@@ -16,7 +16,7 @@ interface CourseWork {
   quizzes: Task[];
 }
 
-export default function TasksSidebar({ selectedTask, onTaskSelect }: { selectedTask?: any, onTaskSelect: (courseId: any, taskId: any, type: string) => void }) {
+export default function TasksSidebar({ selectedTask, onTaskSelect }: { selectedTask?: any, onTaskSelect: (courseId: any, taskId: any, type: string, courseName?: string) => void }) {
   const [work, setWork] = useState<CourseWork[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -99,9 +99,9 @@ export default function TasksSidebar({ selectedTask, onTaskSelect }: { selectedT
                     key={`${task.type}-${task.id}-${i}`} 
                     onClick={() => {
                       if (isSelected) {
-                        onTaskSelect(null, null, '');
+                        onTaskSelect(null, null, '', undefined);
                       } else {
-                        onTaskSelect(course.course_id, task.id, task.type);
+                        onTaskSelect(course.course_id, task.id, task.type, course.course_name);
                       }
                     }}
                     className={`p-5 rounded-2xl shadow-[0_4px_12px_rgba(0,0,0,0.03)] border transition-all cursor-pointer group ${

@@ -1,6 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import api from '../lib/api';
-import { FileText, Link as LinkIcon, Download, Clock, X } from 'lucide-react';
+import { FileText, Link as LinkIcon, Download, Clock, X, Terminal, Loader2, Send } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+
+interface Message {
+  role: 'user' | 'assistant';
+  content: string;
+  pipelineLog?: any[];
+}
 
 export default function ChatArea({ 
   selectedTask, 
@@ -14,8 +21,52 @@ export default function ChatArea({
   const [taskDetails, setTaskDetails] = useState<any>(null);
   const [loading, setLoading] = useState(false);
 
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll chat to bottom
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
   useEffect(() => {
-    // We only fetch for assignments for now
+    scrollToBottom();
+  }, [messages, isTyping]);
+
+  // Load persistence
+  useEffect(() => {
+    if (selectedTask?.task_id) {
+      const saved = localStorage.getItem(`chat_${selectedTask.task_id}`);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          setMessages(parsed.messages || []);
+          setSessionId(parsed.sessionId || null);
+        } catch (e) {
+          setMessages([]);
+          setSessionId(null);
+        }
+      } else {
+        setMessages([]);
+        setSessionId(null);
+      }
+    } else {
+      setMessages([]);
+      setSessionId(null);
+    }
+  }, [selectedTask?.task_id]);
+
+  // Save persistence
+  useEffect(() => {
+    if (selectedTask?.task_id && messages.length > 0) {
+      localStorage.setItem(`chat_${selectedTask.task_id}`, JSON.stringify({ messages, sessionId }));
+    }
+  }, [messages, sessionId, selectedTask?.task_id]);
+
+  useEffect(() => {
     if (!selectedTask || selectedTask.type !== 'assignment') {
       setTaskDetails(null);
       return;
@@ -34,11 +85,10 @@ export default function ChatArea({
     }
     
     fetchDetails();
-  }, [selectedTask]);
+  }, [selectedTask?.task_id, selectedTask?.org_unit_id, selectedTask?.type]);
 
   const handleDownload = async (fileId: number, fileName: string) => {
     try {
-      // Use the new assignment attachment download endpoint
       const res = await api.get(
         `/courses/${selectedTask.org_unit_id}/assignments/${selectedTask.task_id}/attachments/${fileId}/download`,
         { responseType: 'blob' }
@@ -57,11 +107,56 @@ export default function ChatArea({
     }
   };
 
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!input.trim() || !selectedTask || isTyping) return;
+
+    const userMsg = input.trim();
+    setInput('');
+    
+    const newMessages = [...messages, { role: 'user' as const, content: userMsg }];
+    setMessages(newMessages);
+    setIsTyping(true);
+
+    try {
+      const payload = {
+        prompt: userMsg,
+        course_id: selectedTask.org_unit_id,
+        org_unit_id: selectedTask.org_unit_id,
+        course_name: selectedTask.course_name || "",
+        assignment_id: selectedTask.task_id,
+        assignment_text: taskDetails?.instructions_html || "",
+        assignment_attachments: taskDetails?.attachments?.map((a: any) => ({
+          file_id: a.file_id,
+          file_name: a.file_name,
+          size: a.size
+        })) || [],
+        selected_topic_ids: selectedTopics,
+        chat_history: messages.map(m => ({ role: m.role, content: m.content }))
+      };
+
+      const res = await api.post('/chat', payload);
+      setSessionId(res.data.session_id);
+      
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: res.data.response,
+        pipelineLog: res.data.pipeline_log
+      }]);
+
+    } catch (err) {
+      console.error("Chat API failed", err);
+      setMessages(prev => [...prev, { role: 'assistant', content: "Sorry, I encountered an error processing your request." }]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
   return (
     <div className="flex-1 flex flex-col w-full h-full overflow-hidden">
       
-      {/* Top Section: Task Details */}
-      <div className="flex-1 overflow-y-auto w-full custom-scrollbar flex flex-col">
+      {/* Top Section: Task Details & Chat History */}
+      <div className="flex-1 overflow-y-auto w-full custom-scrollbar flex flex-col pb-6">
         {!selectedTask && (
           <div className="flex-1 flex flex-col justify-center items-center text-center opacity-80 mt-20 p-8 w-full max-w-4xl mx-auto shrink-0">
             <h2 className="text-4xl font-semibold text-[#08060d] dark:text-[#f3f4f6] tracking-tight m-0 mb-3">
@@ -80,9 +175,10 @@ export default function ChatArea({
           </div>
         )}
 
+        {/* Assignment Details Banner */}
         {!loading && taskDetails && selectedTask && selectedTask.type === 'assignment' && (
-          <div className="p-8 w-full max-w-5xl mx-auto">
-            <div className="bg-white dark:bg-[#1f2028] p-8 md:p-10 rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-[#e5e4e7] dark:border-[#2e303a] mb-6 transition-all duration-300 relative">
+          <div className="p-8 pb-4 w-full max-w-5xl mx-auto">
+            <div className="bg-white dark:bg-[#1f2028] p-8 md:p-10 rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-[#e5e4e7] dark:border-[#2e303a] mb-2 transition-all duration-300 relative">
               <div className="flex flex-col md:flex-row md:items-start justify-between gap-6 mb-8">
                 <div className="flex items-start gap-5 flex-1 min-w-0">
                   <button 
@@ -94,7 +190,7 @@ export default function ChatArea({
                   </button>
                   <div className="flex-1 min-w-0">
                     <span className="text-xs font-extrabold uppercase tracking-widest text-[#aa3bff] dark:text-[#c084fc] mb-3 block opacity-90">
-                      ASSIGNMENT
+                      ASSIGNMENT {selectedTask.course_name ? `• ${selectedTask.course_name}` : ''}
                     </span>
                     <h2 className="text-3xl font-extrabold text-[#08060d] dark:text-[#f3f4f6] tracking-tight leading-tight">
                       {taskDetails.name}
@@ -159,22 +255,105 @@ export default function ChatArea({
             </div>
           </div>
         )}
+
+        {/* Chat Thread */}
+        <div className="w-full max-w-4xl mx-auto px-4 lg:px-8 space-y-6 shrink-0 pb-4">
+          {messages.map((msg, i) => (
+            <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+              <div 
+                className={`max-w-[85%] md:max-w-[75%] rounded-2xl p-5 ${
+                  msg.role === 'user' 
+                    ? 'bg-[#aa3bff] text-white rounded-br-sm' 
+                    : 'bg-white dark:bg-[#1f2028] text-[#08060d] dark:text-[#f3f4f6] border border-[#e5e4e7] dark:border-[#2e303a] rounded-bl-sm shadow-sm'
+                }`}
+              >
+                {msg.role === 'user' ? (
+                  <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
+                ) : (
+                  <div className="prose dark:prose-invert max-w-none text-[#08060d] dark:text-[#f3f4f6] prose-p:my-1 prose-ul:my-2">
+                    <ReactMarkdown>{msg.content}</ReactMarkdown>
+                  </div>
+                )}
+              </div>
+              
+              {/* Pipeline Log visualization (only for assistant messages) */}
+              {msg.role === 'assistant' && msg.pipelineLog && msg.pipelineLog.length > 0 && (
+                <div className="mt-3 bg-[#1e1e1e] text-[#d4d4d4] rounded-lg p-3 text-[11px] font-mono w-full md:max-w-[75%] border border-[#333] shadow-inner overflow-hidden flex flex-col gap-1.5 opacity-90 transition-opacity hover:opacity-100">
+                  <div className="flex items-center gap-2 mb-1 text-[#4ec9b0] font-bold pb-1.5 border-b border-[#333]">
+                    <Terminal size={12} />
+                    <span>Pipeline Execution Log</span>
+                  </div>
+                  {msg.pipelineLog.map((log: any, idx) => (
+                    <div key={idx} className="flex flex-col gap-0.5 ml-1">
+                      <div className="flex justify-between items-center group">
+                        <div className="flex items-center gap-1.5 text-[#ce9178]">
+                          <span className={`${
+                            log.status === 'done' ? 'text-green-500' : 
+                            log.status === 'error' ? 'text-red-500' :
+                            log.status === 'warning' ? 'text-yellow-500' : 'text-gray-500'
+                          }`}>[{log.status}]</span>
+                          <span className="font-semibold text-[#9cdcfe]">{log.node}</span>
+                        </div>
+                        <span className="text-[#608b4e]">{log.duration_s?.toFixed(2)}s</span>
+                      </div>
+                      {log.detail && (
+                        <span className="text-gray-400 pl-[4.5rem] truncate group-hover:whitespace-normal group-hover:break-words">{log.detail}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+
+          {isTyping && (
+            <div className="flex justify-start">
+              <div className="bg-white dark:bg-[#1f2028] border border-[#e5e4e7] dark:border-[#2e303a] rounded-2xl rounded-bl-sm p-5 shadow-sm flex items-center gap-3">
+                <Loader2 className="animate-spin text-[#aa3bff] dark:text-[#c084fc]" size={20} />
+                <span className="text-sm font-medium text-[#6b6375] dark:text-[#9ca3af]">TruStudy is thinking...</span>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
       </div>
 
       {/* Bottom Section: Chat Input */}
-      <div className="p-8 pt-0 w-full max-w-4xl mx-auto shrink-0 mt-auto bg-[#f4f3ec] dark:bg-[#16171d]">
-        <div className="w-full relative shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.4)] rounded-2xl border border-transparent dark:border-[#2e303a]">
+      <div className="p-8 pt-0 w-full max-w-4xl mx-auto shrink-0 mt-auto bg-[#f4f3ec] dark:bg-[#16171d] relative">
+        <form onSubmit={handleSubmit} className="w-full relative shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.4)] rounded-[1.5rem] border border-transparent dark:border-[#2e303a] font-sans flex flex-col bg-white dark:bg-[#1f2028] focus-within:ring-2 focus-within:ring-[#aa3bff] dark:focus-within:ring-[#c084fc] transition-all duration-200 group">
+          
           <input 
             type="text" 
-            placeholder={selectedTask ? "Ask a question about this assignment..." : "Ask anything about your courses..."}
-            className="w-full px-6 py-5 rounded-2xl bg-white dark:bg-[#1f2028] text-[#08060d] dark:text-[#f3f4f6] focus:outline-none focus:ring-2 focus:ring-[#aa3bff] dark:focus:ring-[#c084fc] transition-all text-lg mb-0 font-sans shadow-inner"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            disabled={!selectedTask || isTyping}
+            placeholder={
+              !selectedTask ? "Select an assignment to chat..." : 
+              isTyping ? "Wait for response..." : "Ask a question about this assignment..."
+            }
+            className="w-full px-6 py-5 rounded-[1.5rem] bg-transparent text-[#08060d] dark:text-[#f3f4f6] focus:outline-none text-lg border-none"
           />
-          <button className="absolute right-4 top-1/2 transform -translate-y-1/2 p-2.5 bg-[#aa3bff] hover:bg-[#9922ff] dark:bg-[#c084fc] dark:hover:bg-[#a855f7] text-white dark:text-[#08060d] rounded-xl shadow-md transition-colors cursor-pointer border-none flex items-center justify-center">
-            <svg className="w-6 h-6 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-            </svg>
+          
+          {selectedTopics && selectedTopics.length > 0 && (
+             <div className="px-6 pb-4 pt-1 flex gap-2 overflow-x-auto custom-scrollbar">
+                {selectedTopics.map((t, idx) => (
+                  <span key={idx} className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-bold bg-[#f4f3ec] dark:bg-[#2e303a] text-[#aa3bff] dark:text-[#c084fc] whitespace-nowrap border border-[#e5e4e7] dark:border-[#3f414d]">
+                    <FileText size={12} className="mr-1.5" />
+                    {t.title}
+                  </span>
+                ))}
+             </div>
+          )}
+
+          <button 
+            type="submit"
+            disabled={!input.trim() || !selectedTask || isTyping}
+            className="absolute right-3.5 top-3.5 p-2.5 bg-[#aa3bff] hover:bg-[#9922ff] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl shadow-md transition-colors border-none flex items-center justify-center shrink-0"
+          >
+            <Send size={20} strokeWidth={2.5} className="-ml-0.5 mt-0.5" />
           </button>
-        </div>
+        </form>
       </div>
     </div>
   );

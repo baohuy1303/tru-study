@@ -11,14 +11,12 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   // Map of topic_id -> { id, title }
   const [checkedTopicsMap, setCheckedTopicsMap] = useState<Map<number, any>>(new Map());
 
-  const handleTaskSelect = (course_id: any, task_id: any, type: string) => {
+  const handleTaskSelect = (course_id: any, task_id: any, type: string, course_name?: string) => {
     if (!course_id) {
       setSelectedTask(null);
       return;
     }
-    // Try to get course name from sidebars if feasible, for now omitting 
-    // Wait... if we have the course object, we could pass its name too.
-    setSelectedTask({ org_unit_id: course_id, task_id, type });
+    setSelectedTask({ org_unit_id: course_id, task_id, type, course_name });
     setTasksOpen(false);
   };
 
