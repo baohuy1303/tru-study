@@ -87,6 +87,7 @@ async def chat_stream(body: ChatRequest, token: str = Depends(get_bs_token)):
             "context_mode": last_state.get("context_mode"),
             "retrieval_queries": last_state.get("retrieval_queries", []),
             "inaccessible_topics": last_state.get("inaccessible_topics", []),
+            "too_long_videos": last_state.get("too_long_videos", []),
             "session_id": session_id,
             "pipeline_log": last_state.get("pipeline_log", [])
         }

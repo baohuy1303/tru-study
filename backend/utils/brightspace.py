@@ -53,13 +53,19 @@ def get_content_catalog(org_unit_id: int, bs_token: str) -> list[dict]:
                         walk(children, current_path)
 
                 elif item_type == 1:
-                    # Topic (leaf node)
+                    # Topic (leaf node) — extract file extension from title
+                    file_ext = ""
+                    dot_idx = title.rfind(".")
+                    if dot_idx > 0:
+                        file_ext = title[dot_idx:].lower()
+
                     catalog.append({
                         "id": item.get("Id"),
                         "title": title,
                         "topic_type": item.get("TopicType"),
                         "url": item.get("Url"),
                         "module_path": path,
+                        "file_extension": file_ext,
                     })
 
         walk(modules)

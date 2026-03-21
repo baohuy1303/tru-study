@@ -45,6 +45,9 @@ class GraphState(TypedDict, total=False):
     # ── Inaccessible topics ────────────────────────────────────────────────
     inaccessible_topics: list[dict]  # [{"id", "title", "url"}] link-type topics the fetcher couldn't download
 
+    # ── Too-long videos ──────────────────────────────────────────────────
+    too_long_videos: list[dict]      # [{"id", "title", "duration_estimate_min"}] videos over 10 min
+
     # ── Pipeline logging ───────────────────────────────────────────────────
     pipeline_log: list[dict]  # [{"node", "status", "detail", "duration_s"}]
 

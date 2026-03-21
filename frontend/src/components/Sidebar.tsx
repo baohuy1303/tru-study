@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ChevronRight, ChevronDown, Folder, FileText, BookOpen, ExternalLink, Paperclip, Loader2 } from 'lucide-react';
+import { ChevronRight, ChevronDown, Folder, FileText, BookOpen, ExternalLink, Paperclip, Loader2, Video } from 'lucide-react';
 import api from '../lib/api';
 
 // TreeNode component for recursive rendering
@@ -29,6 +29,7 @@ function TreeNode({
   const isModule = level === 0 || node.type === 0;
   const isLinkTopic = !isModule && node.topic_type === 3;
   const isDownloadableTopic = !isModule && node.topic_type === 1;
+  const isVideoTopic = isDownloadableTopic && /\.(mp4|mov|webm|mkv|avi|m4v|wmv|flv)$/i.test((node.title || '') + (node.url || '') + (node.file_name || '') + (node.Url || '') + (node.FileName || ''));
   const replacedLink = replacedLinksMap?.get(node.id);
   const isSelectableTopic = isDownloadableTopic || (isLinkTopic && !!replacedLink);
   const isChecked = checkedTopics ? checkedTopics.has(node.id) : false;
@@ -148,6 +149,7 @@ function TreeNode({
           {level === 0 ? <BookOpen size={18} /> :
            isModule ? <Folder size={18} /> :
            (isLinkTopic && !replacedLink) ? <ExternalLink size={18} className="!text-blue-500 dark:!text-blue-400" /> :
+           isVideoTopic ? <Video size={18} className="!text-red-500 dark:!text-red-400" /> :
            <FileText size={18} />}
         </div>
 

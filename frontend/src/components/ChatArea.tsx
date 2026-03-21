@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../lib/api';
-import { FileText, Link as LinkIcon, Download, Clock, X, Terminal, Loader2, Send, Trash2, Paperclip, Pin, AlertTriangle, ExternalLink } from 'lucide-react';
+import { FileText, Link as LinkIcon, Download, Clock, X, Terminal, Loader2, Send, Trash2, Paperclip, Pin, AlertTriangle, ExternalLink, Video } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -45,6 +45,7 @@ export default function ChatArea({
 
   const [inaccessibleTopics, setInaccessibleTopics] = useState<any[]>([]);
   const [uploadingForTopic, setUploadingForTopic] = useState<number | null>(null);
+  const [tooLongVideos, setTooLongVideos] = useState<any[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -65,10 +66,11 @@ export default function ChatArea({
     scrollToBottom();
   }, [messages, isTyping]);
 
-  // Reset uploaded files and inaccessible topics when task changes
+  // Reset uploaded files, inaccessible topics, and too-long videos when task changes
   useEffect(() => {
     setUploadedFiles([]);
     setInaccessibleTopics([]);
+    setTooLongVideos([]);
   }, [selectedTask?.task_id]);
 
   // Reset everything when resetKey changes (clear-all triggered from Dashboard)
@@ -78,6 +80,7 @@ export default function ChatArea({
       setMessages([]);
       setSessionId(null);
       setInaccessibleTopics([]);
+      setTooLongVideos([]);
     }
   }, [resetKey]);
 
@@ -314,6 +317,9 @@ export default function ChatArea({
                     if (data.inaccessible_topics?.length > 0) {
                       setInaccessibleTopics(data.inaccessible_topics);
                     }
+                    if (data.too_long_videos?.length > 0) {
+                      setTooLongVideos(data.too_long_videos);
+                    }
                   }
                 } catch(e) {
                   console.error("Error parsing stream chunk", e, dataStr);
@@ -501,6 +507,34 @@ export default function ChatArea({
                     </label>
                   </div>
                 ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Too-long videos banner */}
+        {tooLongVideos.length > 0 && (
+          <div className="px-8 pb-4 w-full max-w-5xl mx-auto">
+            <div className="p-5 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-700 rounded-2xl">
+              <div className="flex items-start gap-3">
+                <AlertTriangle size={18} className="text-orange-600 dark:text-orange-400 shrink-0 mt-0.5" strokeWidth={2.5} />
+                <div>
+                  <p className="text-sm font-bold text-orange-800 dark:text-orange-200 mb-1">
+                    Some video materials are too long to transcribe
+                  </p>
+                  <p className="text-sm text-orange-700 dark:text-orange-300 mb-3">
+                    Videos over 10 minutes cannot be transcribed in the current plan. Shorter videos are transcribed automatically when selected.
+                  </p>
+                  <div className="flex flex-col gap-1.5">
+                    {tooLongVideos.map((v: any) => (
+                      <div key={v.id} className="flex items-center gap-2 text-sm text-orange-700 dark:text-orange-300">
+                        <Video size={14} className="shrink-0" />
+                        <span className="font-medium truncate">{v.title}</span>
+                        <span className="text-xs opacity-70">~{v.duration_estimate_min} min</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
