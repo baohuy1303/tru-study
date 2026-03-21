@@ -1,27 +1,79 @@
 """Node 1: PDF Parser & Token Evaluator.
 
-Extracts text from assignment PDF (or uses provided text), counts tokens.
+Extracts text from:
+1. Brightspace assignment instructions (already in state as assignment_text)
+2. Brightspace PDF attachments (downloaded via API using bs_token)
+3. Manually uploaded PDF (from assignment_pdf_path)
+
+Counts tokens for downstream routing.
 """
+
+import httpx
 
 from agents.state import GraphState
 from utils.tokens import count_tokens
+from utils.pdf import extract_text_from_pdf, extract_text_from_bytes
+
+BS_BASE = "https://learn.truman.edu"
+LE_VER = "1.92"
 
 
 def pdf_parser(state: GraphState) -> dict:
-    """Extract assignment text and count tokens.
+    """Extract assignment text from all sources and count tokens."""
+    parts = []
 
-    If assignment_text is already provided (e.g. from Brightspace instructions),
-    skip PDF parsing and just count tokens. If assignment_pdf_path is set,
-    parse the PDF to extract text.
-    """
-    text = state.get("assignment_text") or ""
+    # Source 1: Brightspace instructions text (already provided by frontend)
+    instructions = state.get("assignment_text") or ""
+    if instructions.strip():
+        parts.append(instructions.strip())
 
-    # TODO (Phase 2): If assignment_pdf_path is set and text is empty,
-    # parse PDF with pymupdf and extract clean text.
+    # Source 2: Brightspace PDF attachments (auto-download)
+    attachments = state.get("assignment_attachments") or []
+    bs_token = state.get("bs_token", "")
+    org_unit_id = state.get("org_unit_id")
+    assignment_id = state.get("assignment_id")
 
-    token_count = count_tokens(text) if text else 0
+    if attachments and bs_token and org_unit_id and assignment_id:
+        pdf_attachments = [
+            a for a in attachments
+            if a.get("file_name", "").lower().endswith(".pdf")
+        ]
+        for attachment in pdf_attachments:
+            file_id = attachment.get("file_id")
+            if not file_id:
+                continue
+            try:
+                with httpx.Client(
+                    base_url=BS_BASE,
+                    headers={"Authorization": f"Bearer {bs_token}"},
+                    timeout=30,
+                    follow_redirects=True,
+                ) as client:
+                    resp = client.get(
+                        f"/d2l/api/le/{LE_VER}/{org_unit_id}/dropbox/folders/{assignment_id}/attachments/{file_id}"
+                    )
+                    if resp.status_code == 200:
+                        extracted = extract_text_from_bytes(resp.content)
+                        if extracted:
+                            parts.append(f"--- Attachment: {attachment.get('file_name', 'unknown.pdf')} ---\n{extracted}")
+            except Exception as e:
+                print(f"[pdf_parser] Failed to download attachment {file_id}: {e}")
+
+    # Source 3: Manually uploaded PDF
+    pdf_path = state.get("assignment_pdf_path")
+    if pdf_path:
+        try:
+            extracted = extract_text_from_pdf(pdf_path)
+            if extracted:
+                parts.append(f"--- Uploaded PDF ---\n{extracted}")
+        except Exception as e:
+            print(f"[pdf_parser] Failed to parse uploaded PDF: {e}")
+
+    # Combine all sources
+    full_text = "\n\n".join(parts) if parts else ""
+    token_count = count_tokens(full_text) if full_text else 0
 
     return {
-        "assignment_text": text,
+        "assignment_text": full_text,
         "assignment_token_count": token_count,
     }

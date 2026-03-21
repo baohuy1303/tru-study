@@ -8,10 +8,13 @@ class GraphState(TypedDict, total=False):
     # ── Input ────────────────────────────────────────────────────────────────
     user_prompt: str
     chat_history: list[dict]          # [{"role": "user"|"assistant", "content": str}]
-    assignment_pdf_path: str | None   # Local path to downloaded PDF
+    assignment_pdf_path: str | None   # Local path to uploaded PDF
     assignment_text: str | None       # Raw text from instructions or PDF
     course_id: int
     org_unit_id: int
+    course_name: str                  # Course name for summary context
+    assignment_id: int | None         # Brightspace dropbox folder ID
+    assignment_attachments: list[dict] # [{"file_id": int, "file_name": str, "size": int}]
     bs_token: str                     # Brightspace Bearer token for API calls
 
     # ── PDF processing ───────────────────────────────────────────────────────
