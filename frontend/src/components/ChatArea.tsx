@@ -8,7 +8,10 @@ export default function ChatArea({ selectedTask, onClearTask }: { selectedTask: 
 
   useEffect(() => {
     // We only fetch for assignments for now
-    if (!selectedTask || selectedTask.type !== 'assignment') return;
+    if (!selectedTask || selectedTask.type !== 'assignment') {
+      setTaskDetails(null);
+      return;
+    }
     
     async function fetchDetails() {
       setLoading(true);
@@ -24,6 +27,27 @@ export default function ChatArea({ selectedTask, onClearTask }: { selectedTask: 
     
     fetchDetails();
   }, [selectedTask]);
+
+  const handleDownload = async (fileId: number, fileName: string) => {
+    try {
+      // Use the new assignment attachment download endpoint
+      const res = await api.get(
+        `/courses/${selectedTask.org_unit_id}/assignments/${selectedTask.task_id}/attachments/${fileId}/download`,
+        { responseType: 'blob' }
+      );
+      
+      const url = window.URL.createObjectURL(res.data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Download failed", err);
+    }
+  };
 
   return (
     <div className="flex-1 flex flex-col w-full h-full overflow-hidden">
@@ -50,7 +74,7 @@ export default function ChatArea({ selectedTask, onClearTask }: { selectedTask: 
 
         {!loading && taskDetails && selectedTask && selectedTask.type === 'assignment' && (
           <div className="p-8 w-full max-w-5xl mx-auto">
-            <div className="bg-white dark:bg-[#1f2028] p-8 md:p-10 rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-[#e5e4e7] dark:border-[#2e303a] mb-6 transition-all duration-300">
+            <div className="bg-white dark:bg-[#1f2028] p-8 md:p-10 rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-[#e5e4e7] dark:border-[#2e303a] mb-6 transition-all duration-300 relative">
               <div className="flex flex-col md:flex-row md:items-start justify-between gap-6 mb-8">
                 <div className="flex items-start gap-5 flex-1 min-w-0">
                   <button 
@@ -104,7 +128,10 @@ export default function ChatArea({ selectedTask, onClearTask }: { selectedTask: 
                           <p className="text-[15px] font-semibold text-[#08060d] dark:text-[#f3f4f6] truncate group-hover:text-[#aa3bff] dark:group-hover:text-[#c084fc] transition-colors">{a.file_name}</p>
                           <p className="text-xs font-medium tracking-wide text-[#6b6375] dark:text-[#9ca3af] mt-1">{(a.size / 1024).toFixed(1)} KB</p>
                         </div>
-                        <button className="p-2.5 bg-white dark:bg-[#1f2028] border border-[#e5e4e7] dark:border-[#3f414d] hover:bg-[#aa3bff] hover:text-white dark:hover:bg-[#c084fc] dark:hover:text-[#08060d] rounded-xl transition-all shadow-sm text-[#08060d] dark:text-[#f3f4f6] shrink-0 cursor-pointer">
+                        <button 
+                          onClick={() => handleDownload(a.file_id, a.file_name)}
+                          className="p-2.5 bg-white dark:bg-[#1f2028] border border-[#e5e4e7] dark:border-[#3f414d] hover:bg-[#aa3bff] hover:text-white dark:hover:bg-[#c084fc] dark:hover:text-[#08060d] rounded-xl transition-all shadow-sm text-[#08060d] dark:text-[#f3f4f6] shrink-0 cursor-pointer"
+                        >
                            <Download size={16} strokeWidth={2.5} />
                         </button>
                       </div>

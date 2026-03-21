@@ -4,3 +4,11 @@ playwright
 httpx
 python-dotenv
 supabase
+langgraph
+langchain
+langchain-openai
+langchain-community
+chromadb
+tiktoken
+pymupdf
+rapidfuzz

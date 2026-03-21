@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from database import get_supabase
 from supabase import AsyncClient
 from routes.brightspace import router as brightspace_router
+from routes.chat import router as chat_router
 
 app = FastAPI()
 
@@ -15,6 +16,7 @@ app.add_middleware(
 )
 
 app.include_router(brightspace_router)
+app.include_router(chat_router)
 
 @app.get("/")
 def read_root():

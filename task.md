@@ -11,7 +11,7 @@ This document outlines the API routes we will build in FastAPI, mapping directly
 - [ ] `GET /api/dashboard/work`: Aggregate pending assignments, quizzes, and overdue items cross-course.
 - [ ] `GET /api/courses/{org_unit_id}/modules`: Fetch root content modules.
 - [ ] `GET /api/courses/{org_unit_id}/modules/{module_id}`: Fetch children of a content module.
-- [ ] `GET /api/courses/{org_unit_id}/files/{topic_id}/download`: Simple proxy for downloading course files.
+- [x] `GET /api/courses/{org_unit_id}/files/{topic_id}/download`: Simple proxy for downloading course files.
 
 ---
 

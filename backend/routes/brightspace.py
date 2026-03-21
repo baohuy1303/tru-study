@@ -257,3 +257,20 @@ async def download_file(org_unit_id: int, topic_id: int, token: str = Depends(ge
             media_type=content_type,
             headers=headers,
         )
+
+
+# ── GET /api/courses/{org_unit_id}/assignments/{folder_id}/attachments/{file_id}/download ──
+
+@router.get("/courses/{org_unit_id}/assignments/{folder_id}/attachments/{file_id}/download")
+async def download_assignment_attachment(org_unit_id: int, folder_id: int, file_id: int, token: str = Depends(get_bs_token)):
+    async with _bs_client(token) as c:
+        resp = await c.get(f"/d2l/api/le/{LE_VER}/{org_unit_id}/dropbox/folders/{folder_id}/attachments/{file_id}")
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail="Failed to download assignment attachment")
+
+        content_type = resp.headers.get("content-type", "application/octet-stream")
+
+        return StreamingResponse(
+            iter([resp.content]),
+            media_type=content_type,
+        )
