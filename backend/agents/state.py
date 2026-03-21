@@ -16,6 +16,7 @@ class GraphState(TypedDict, total=False):
     assignment_id: int | None         # Brightspace dropbox folder ID
     assignment_attachments: list[dict] # [{"file_id": int, "file_name": str, "size": int}]
     bs_token: str                     # Brightspace Bearer token for API calls
+    session_id: str | None            # Session key for caching across turns
 
     # ── PDF processing ───────────────────────────────────────────────────────
     assignment_token_count: int

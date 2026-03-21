@@ -126,6 +126,11 @@ def _download_and_extract(topic_id: int, org_unit_id: int, bs_token: str) -> tup
 
 def material_fetcher(state: GraphState) -> dict:
     """Fetch, match, download, and embed course materials."""
+    # Skip if materials already cached (multi-turn)
+    if state.get("embedded_materials") is not None:
+        print("[material_fetcher] Skipping -- materials already cached")
+        return {}
+
     references = state.get("material_references") or []
     if not references:
         print("[material_fetcher] No material references to fetch")

@@ -53,6 +53,11 @@ If no course materials are referenced, return an empty list. Do NOT hallucinate 
 
 def material_extractor(state: GraphState) -> dict:
     """Extract material references from assignment text using structured LLM output."""
+    # Skip if references already cached (multi-turn)
+    if state.get("material_references") is not None:
+        print("[material_extractor] Skipping -- references already cached")
+        return {}
+
     text = state.get("assignment_text", "")
 
     if not text.strip():

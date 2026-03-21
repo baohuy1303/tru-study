@@ -73,6 +73,11 @@ def _generate_summary(text: str, course_name: str, detailed: bool) -> str:
 
 def handle_small_context(state: GraphState) -> dict:
     """For assignments under the token threshold — inject full text, generate exhaustive summary."""
+    # Skip if summary already cached (multi-turn)
+    if state.get("assignment_summary"):
+        print("[context_handler] Skipping small handler -- summary already cached")
+        return {}
+
     text = state.get("assignment_text", "")
     course_name = state.get("course_name", "Unknown Course")
 
@@ -87,6 +92,11 @@ def handle_small_context(state: GraphState) -> dict:
 
 def handle_large_context(state: GraphState) -> dict:
     """For assignments over the token threshold — chunk, embed into Chroma, generate concise overview."""
+    # Skip if summary already cached (multi-turn)
+    if state.get("assignment_summary"):
+        print("[context_handler] Skipping large handler -- summary already cached")
+        return {}
+
     text = state.get("assignment_text", "")
     course_name = state.get("course_name", "Unknown Course")
     assignment_id = state.get("assignment_id")

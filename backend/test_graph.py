@@ -1,4 +1,4 @@
-"""Smoke tests for the LangGraph pipeline (Phase 1 + Phase 2).
+"""Smoke tests for the LangGraph pipeline (Phases 1-7).
 
 Run: python test_graph.py
      python test_graph.py --with-llm   (requires OPENAI_API_KEY)
@@ -10,6 +10,10 @@ import pymupdf
 
 from agents.graph import build_graph
 from utils.chroma import get_assignment_collection, get_chroma_client
+from utils.session import (
+    build_session_id, load_session, save_session,
+    append_turn, cache_pipeline_state,
+)
 
 USE_LLM = "--with-llm" in sys.argv
 
@@ -305,6 +309,347 @@ def test_fuzzy_matching():
         print(f"       - '{m['matched_ref']}' -> '{m['title']}' (score={m['match_score']})")
 
 
+# ── Phase 5+6 tests ──────────────────────────────────────────────────────────
+
+def test_query_rewriting():
+    """Verify LLM generates diverse retrieval queries from a vague prompt (requires OPENAI_API_KEY)."""
+    if not USE_LLM:
+        print("[SKIP] test_query_rewriting — run with --with-llm")
+        return
+
+    from agents.nodes.query_rewriter import query_rewriter
+
+    state = {
+        "user_prompt": "help with Q3",
+        "chat_history": [],
+        "assignment_summary": (
+            "Assignment 4: Relational Database Design. "
+            "Question 1: Normalize a given schema to 3NF. "
+            "Question 2: Draw an ER diagram for the normalized schema. "
+            "Question 3: Write SQL CREATE TABLE statements for the normalized tables, "
+            "including primary keys, foreign keys, and NOT NULL constraints. "
+            "Due Friday March 28."
+        ),
+    }
+
+    result = query_rewriter(state)
+    queries = result.get("retrieval_queries", [])
+
+    assert len(queries) >= 2, f"Expected 2-3 queries, got {len(queries)}"
+    assert len(queries) <= 3, f"Expected 2-3 queries, got {len(queries)}"
+    assert all(len(q) > 5 for q in queries), f"Queries too short: {queries}"
+
+    # At least one query should expand beyond the vague "Q3"
+    all_text = " ".join(queries).lower()
+    has_domain_terms = any(
+        term in all_text
+        for term in ["sql", "create table", "primary key", "foreign key", "normalized", "normalization"]
+    )
+    assert has_domain_terms, f"Queries should contain domain terms, got: {queries}"
+
+    print(f"[PASS] Query rewriting — {len(queries)} queries generated:")
+    for q in queries:
+        print(f"       - {q}")
+
+
+def test_query_rewriting_with_history():
+    """Verify query rewriter resolves references from chat history (requires OPENAI_API_KEY)."""
+    if not USE_LLM:
+        print("[SKIP] test_query_rewriting_with_history — run with --with-llm")
+        return
+
+    from agents.nodes.query_rewriter import query_rewriter
+
+    state = {
+        "user_prompt": "what about the next part?",
+        "chat_history": [
+            {"role": "user", "content": "How do I normalize the schema to 3NF?"},
+            {"role": "assistant", "content": "To normalize to 3NF, first identify all functional dependencies..."},
+        ],
+        "assignment_summary": (
+            "Assignment 4: Relational Database Design. "
+            "Question 1: Normalize a given schema to 3NF. "
+            "Question 2: Draw an ER diagram for the normalized schema. "
+            "Question 3: Write SQL CREATE TABLE statements."
+        ),
+    }
+
+    result = query_rewriter(state)
+    queries = result.get("retrieval_queries", [])
+
+    assert len(queries) >= 2, f"Expected 2-3 queries, got {len(queries)}"
+    # Queries should reference ER diagrams or Q2, not just "next part"
+    all_text = " ".join(queries).lower()
+    assert "next part" not in all_text, f"Queries should resolve 'next part' reference, got: {queries}"
+
+    print(f"[PASS] Query rewriting with history — {len(queries)} queries:")
+    for q in queries:
+        print(f"       - {q}")
+
+
+def test_full_pipeline_small():
+    """End-to-end test with small assignment — real LLM response (requires OPENAI_API_KEY)."""
+    if not USE_LLM:
+        print("[SKIP] test_full_pipeline_small — run with --with-llm")
+        return
+
+    graph = build_graph()
+    result = graph.invoke({
+        "user_prompt": "How should I approach the is_prime function?",
+        "chat_history": [],
+        "course_id": 200,
+        "org_unit_id": 300,
+        "course_name": "CS 180 Intro to Programming",
+        "assignment_text": (
+            "Assignment 2: Loops and Functions\n\n"
+            "Write a Python program that:\n"
+            "1. Asks the user for a positive integer n\n"
+            "2. Prints a multiplication table from 1 to n\n"
+            "3. Defines a function is_prime(x) that returns True if x is prime\n"
+            "4. Uses is_prime to print all primes up to n\n\n"
+            "Grading (100 points):\n"
+            "- Multiplication table: 30 pts\n"
+            "- is_prime function: 40 pts\n"
+            "- Prime listing: 20 pts\n"
+            "- Code style and comments: 10 pts"
+        ),
+        "bs_token": "test-token",
+    })
+
+    assert result["context_mode"] == "inject"
+    response = result.get("response", "")
+    assert "placeholder" not in response.lower(), "Response should be real LLM output"
+    assert len(response) > 100, f"Response too short: {len(response)} chars"
+    queries = result.get("retrieval_queries", [])
+    assert len(queries) >= 2, f"Expected rewritten queries, got {len(queries)}"
+
+    # Response should mention something relevant to prime checking
+    response_lower = response.lower()
+    has_relevant = any(
+        term in response_lower
+        for term in ["prime", "divisible", "loop", "function", "modulo", "remainder", "%"]
+    )
+    assert has_relevant, f"Response should discuss prime logic, got: {response[:200]}..."
+
+    print(f"[PASS] Full pipeline (small) — {len(response)} char response, {len(queries)} queries")
+    print(f"       Queries: {queries}")
+    print(f"       Response preview: {response[:200]}...")
+
+
+def test_full_pipeline_large():
+    """End-to-end test with large assignment — RAG mode (requires OPENAI_API_KEY)."""
+    if not USE_LLM:
+        print("[SKIP] test_full_pipeline_large — run with --with-llm")
+        return
+
+    graph = build_graph()
+    long_text = (
+        "Part N: Advanced Database Query Optimization. "
+        "In this section you will analyze query execution plans for complex SQL joins "
+        "involving multiple tables with millions of rows. Consider indexing strategies, "
+        "query hints, and the impact of data distribution on optimizer choices. "
+        "Write a detailed report with benchmarks comparing at least 3 approaches. "
+        "Include diagrams showing the execution plan tree for each approach. "
+    ) * 200
+
+    result = graph.invoke({
+        "user_prompt": "What indexing strategies should I consider for the report?",
+        "chat_history": [],
+        "course_id": 400,
+        "org_unit_id": 600,
+        "course_name": "CS 450 Database Systems",
+        "assignment_id": 77777,
+        "assignment_text": long_text,
+        "bs_token": "test-token",
+    })
+
+    assert result["context_mode"] == "rag"
+    assert result["assignment_embedded"] is True
+    response = result.get("response", "")
+    assert "placeholder" not in response.lower(), "Response should be real LLM output"
+    assert len(response) > 100, f"Response too short: {len(response)} chars"
+    queries = result.get("retrieval_queries", [])
+    assert len(queries) >= 2
+
+    print(f"[PASS] Full pipeline (large/RAG) — {len(response)} char response, {len(queries)} queries")
+    print(f"       Queries: {queries}")
+    print(f"       Response preview: {response[:200]}...")
+
+    # Cleanup
+    client = get_chroma_client()
+    try:
+        client.delete_collection("assignment_77777")
+    except Exception:
+        pass
+
+
+# ── Phase 7 tests ────────────────────────────────────────────────────────────
+
+_TEST_SESSION_DIR = os.path.join(os.path.dirname(__file__), "storage", "sessions")
+
+
+def test_session_persistence():
+    """Create, save, load, and verify a session round-trips correctly."""
+    sid = build_session_id(999, 55555)
+    assert sid == "999_55555", f"Unexpected session_id: {sid}"
+
+    # General (no assignment)
+    sid_general = build_session_id(999, None)
+    assert sid_general == "999_general"
+
+    # Save and load
+    save_session(sid, {
+        "session_id": sid,
+        "chat_history": [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"},
+        ],
+        "cached_state": {
+            "assignment_summary": "Test summary",
+            "context_mode": "inject",
+        },
+    })
+
+    loaded = load_session(sid)
+    assert loaded is not None, "Session should have been saved"
+    assert len(loaded["chat_history"]) == 2
+    assert loaded["cached_state"]["assignment_summary"] == "Test summary"
+    assert loaded["cached_state"]["context_mode"] == "inject"
+
+    # Append turn
+    append_turn(sid, "Follow-up question", "Follow-up answer")
+    loaded = load_session(sid)
+    assert len(loaded["chat_history"]) == 4, f"Expected 4 messages, got {len(loaded['chat_history'])}"
+    assert loaded["chat_history"][-2]["content"] == "Follow-up question"
+    assert loaded["chat_history"][-1]["content"] == "Follow-up answer"
+
+    # Cache pipeline state
+    cache_pipeline_state(sid, {
+        "assignment_text": "Full text here",
+        "assignment_token_count": 42,
+        "context_mode": "inject",
+        "assignment_summary": "Updated summary",
+        "assignment_embedded": False,
+        "material_references": [{"name": "Ch1"}],
+        "embedded_materials": ["file.pdf"],
+        "response": "This should NOT be cached",
+    })
+    loaded = load_session(sid)
+    cached = loaded["cached_state"]
+    assert cached["assignment_token_count"] == 42
+    assert cached["assignment_summary"] == "Updated summary"
+    assert cached["material_references"] == [{"name": "Ch1"}]
+    assert "response" not in cached, "response should not be cached"
+
+    # Cleanup
+    session_path = os.path.join(_TEST_SESSION_DIR, f"{sid}.json")
+    if os.path.exists(session_path):
+        os.remove(session_path)
+
+    print("[PASS] Session persistence — save/load/append/cache all work")
+
+
+def test_multi_turn_skip():
+    """Turn 2 should skip expensive nodes when cached state is injected (requires OPENAI_API_KEY)."""
+    if not USE_LLM:
+        print("[SKIP] test_multi_turn_skip — run with --with-llm")
+        return
+
+    graph = build_graph()
+
+    assignment_text = (
+        "Assignment 5: Sorting Algorithms\n\n"
+        "Implement bubble sort, merge sort, and quicksort in Python.\n"
+        "Compare their time complexities on arrays of size 100, 1000, and 10000.\n"
+        "Write a report with benchmark results and analysis.\n\n"
+        "Grading: 30 pts implementation, 40 pts benchmarks, 30 pts report."
+    )
+
+    # Turn 1: Full pipeline
+    result1 = graph.invoke({
+        "user_prompt": "How should I start this assignment?",
+        "chat_history": [],
+        "course_id": 500,
+        "org_unit_id": 700,
+        "course_name": "CS 280 Algorithms",
+        "assignment_text": assignment_text,
+        "bs_token": "test-token",
+    })
+
+    summary1 = result1.get("assignment_summary", "")
+    assert summary1, "First turn should generate a summary"
+    assert result1["context_mode"] == "inject"
+    response1 = result1.get("response", "")
+    assert "placeholder" not in response1.lower()
+
+    # Turn 2: Inject cached state — nodes should skip
+    result2 = graph.invoke({
+        "user_prompt": "Can you explain merge sort in more detail?",
+        "chat_history": [
+            {"role": "user", "content": "How should I start this assignment?"},
+            {"role": "assistant", "content": response1},
+        ],
+        "course_id": 500,
+        "org_unit_id": 700,
+        "course_name": "CS 280 Algorithms",
+        "assignment_text": assignment_text,
+        # Inject cached state from turn 1
+        "assignment_token_count": result1["assignment_token_count"],
+        "assignment_summary": summary1,
+        "context_mode": "inject",
+        "assignment_embedded": False,
+        "material_references": result1.get("material_references", []),
+        "embedded_materials": result1.get("embedded_materials", []),
+        "bs_token": "test-token",
+    })
+
+    # Summary should be the same (not regenerated)
+    assert result2.get("assignment_summary") == summary1, "Summary should be cached, not regenerated"
+    response2 = result2.get("response", "")
+    assert "placeholder" not in response2.lower()
+    assert len(response2) > 100
+
+    # Response should reference merge sort since that's the question
+    response2_lower = response2.lower()
+    has_merge = any(
+        term in response2_lower
+        for term in ["merge", "sort", "divide", "conquer", "recursive"]
+    )
+    assert has_merge, f"Response should discuss merge sort, got: {response2[:200]}..."
+
+    print(f"[PASS] Multi-turn skip — Turn 1: {len(response1)} chars, Turn 2: {len(response2)} chars")
+    print(f"       Summary preserved: {summary1[:100]}...")
+    print(f"       Turn 2 response: {response2[:150]}...")
+
+
+def test_chat_history_accumulation():
+    """Verify append_turn builds up history correctly across 3+ turns."""
+    sid = "test_accumulation_999"
+
+    # Start fresh
+    session_path = os.path.join(_TEST_SESSION_DIR, f"{sid}.json")
+    if os.path.exists(session_path):
+        os.remove(session_path)
+
+    append_turn(sid, "Question 1", "Answer 1")
+    append_turn(sid, "Question 2", "Answer 2")
+    append_turn(sid, "Question 3", "Answer 3")
+
+    loaded = load_session(sid)
+    history = loaded["chat_history"]
+    assert len(history) == 6, f"Expected 6 messages (3 turns), got {len(history)}"
+    assert history[0] == {"role": "user", "content": "Question 1"}
+    assert history[1] == {"role": "assistant", "content": "Answer 1"}
+    assert history[4] == {"role": "user", "content": "Question 3"}
+    assert history[5] == {"role": "assistant", "content": "Answer 3"}
+
+    # Cleanup
+    if os.path.exists(session_path):
+        os.remove(session_path)
+
+    print("[PASS] Chat history accumulation — 3 turns, 6 messages correct")
+
+
 if __name__ == "__main__":
     print("Testing LangGraph pipeline...\n")
     print("=== Phase 1 (no API key) ===")
@@ -321,4 +666,15 @@ if __name__ == "__main__":
     test_material_extraction()
     test_material_extraction_empty()
     test_fuzzy_matching()
+    print()
+    print("=== Phase 5+6 ===")
+    test_query_rewriting()
+    test_query_rewriting_with_history()
+    test_full_pipeline_small()
+    test_full_pipeline_large()
+    print()
+    print("=== Phase 7 ===")
+    test_session_persistence()
+    test_chat_history_accumulation()
+    test_multi_turn_skip()
     print("\n=== All tests done ===")

@@ -20,6 +20,11 @@ LE_VER = "1.92"
 
 def pdf_parser(state: GraphState) -> dict:
     """Extract assignment text from all sources and count tokens."""
+    # Skip if pipeline state is already cached (multi-turn)
+    if state.get("assignment_summary") and state.get("assignment_token_count") is not None:
+        print("[pdf_parser] Skipping -- cached state available")
+        return {}
+
     parts = []
 
     # Source 1: Brightspace instructions text (already provided by frontend)
