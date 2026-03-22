@@ -1,5 +1,7 @@
 # TruStudy
 
+![TruStudy Screenshot 1](./screenshots/TruStudySS1.png)
+![TruStudy Screenshot 2](./screenshots/TruStudySS2.png)
 An AI study assistant built specifically for Truman State University students. TruStudy connects directly to Brightspace — your actual courses, your actual assignments — and answers questions grounded in the real course materials, not hallucinated summaries.
 
 ---
