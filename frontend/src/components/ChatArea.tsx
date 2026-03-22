@@ -26,6 +26,8 @@ export default function ChatArea({
   resetKey = 0,
   onLinkTopicReplaced,
   onTaskPlanReceived,
+  assignmentUploadsMap,
+  onAssignmentFileUploaded,
 }: {
   selectedTask: any,
   onClearTask: () => void,
@@ -33,6 +35,8 @@ export default function ChatArea({
   resetKey?: number,
   onLinkTopicReplaced?: (topicId: number, topicTitle: string, uploadData: any) => void,
   onTaskPlanReceived?: (sessionId: string, plan: any[]) => void,
+  assignmentUploadsMap?: Map<number, any>,
+  onAssignmentFileUploaded?: (taskId: number, uploadData: any) => void,
 }) {
   const [taskDetails, setTaskDetails] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -72,11 +76,16 @@ export default function ChatArea({
   }, [messages, isTyping]);
 
   // Reset uploaded files, inaccessible topics, and too-long videos when task changes
+  // Also restore persisted main file for link-only assignments
   useEffect(() => {
     setUploadedFiles([]);
     setInaccessibleTopics([]);
     setTooLongVideos([]);
-  }, [selectedTask?.task_id]);
+    if (selectedTask?.task_id && assignmentUploadsMap?.has(selectedTask.task_id)) {
+      const saved = assignmentUploadsMap.get(selectedTask.task_id);
+      setUploadedFiles([{ ...saved, is_main: true }]);
+    }
+  }, [selectedTask?.task_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset everything when resetKey changes (clear-all triggered from Dashboard)
   useEffect(() => {
@@ -269,9 +278,44 @@ export default function ChatArea({
     (taskDetails.link_attachments?.length > 0) &&
     (!taskDetails.attachments || taskDetails.attachments.length === 0);
 
+  const hasUploadedMainFile = uploadedFiles.some(f => f.is_main);
+
+  const canChat = selectedTask
+    ? (selectedTask.type !== 'assignment'
+       || !hasOnlyExternalLinks
+       || hasUploadedMainFile
+       || selectedTopics.length > 0)
+    : (uploadedFiles.length > 0 || selectedTopics.length > 0);
+
+  // Handler for the amber-banner "upload assignment file" — persists via Dashboard
+  const handleAssignmentBannerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedTask?.task_id) return;
+    e.target.value = '';
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const token = localStorage.getItem('bs_token');
+      const res = await fetch('http://localhost:8000/api/upload', {
+        method: 'POST',
+        headers: { 'Authorization': token ? `Bearer ${token}` : '' },
+        body: formData,
+      });
+      if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+      const data = await res.json();
+      const fileWithMain = { ...data, is_main: true };
+      setUploadedFiles(prev => [fileWithMain, ...prev.filter(f => !f.is_main)]);
+      onAssignmentFileUploaded?.(selectedTask.task_id, fileWithMain);
+    } catch (err) {
+      console.error("Upload failed", err);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const canChat = selectedTask || uploadedFiles.length > 0 || selectedTopics.length > 0;
     if (!input.trim() || !canChat || isTyping) return;
 
     const userMsg = input.trim();
@@ -373,8 +417,6 @@ export default function ChatArea({
     }
   };
 
-  const canChat = selectedTask || uploadedFiles.length > 0 || selectedTopics.length > 0;
-
   return (
     <div className="flex-1 flex flex-col w-full h-full overflow-hidden">
 
@@ -469,7 +511,7 @@ export default function ChatArea({
                   <label className="inline-flex items-center gap-2 px-4 py-2 bg-amber-100 dark:bg-amber-800/40 hover:bg-amber-200 dark:hover:bg-amber-700/50 text-amber-800 dark:text-amber-200 rounded-xl text-sm font-semibold cursor-pointer transition-colors border border-amber-200 dark:border-amber-700">
                     <Paperclip size={14} strokeWidth={2.5} />
                     Upload assignment file
-                    <input type="file" className="hidden" accept=".pdf,.doc,.docx,.txt,.pptx,.ppt,.mp4,.mov,.webm,.mkv,.avi" onChange={handleFileUpload} />
+                    <input type="file" className="hidden" accept=".pdf,.doc,.docx,.txt,.pptx,.ppt,.mp4,.mov,.webm,.mkv,.avi" onChange={handleAssignmentBannerUpload} />
                   </label>
                 </div>
               )}
@@ -748,9 +790,13 @@ export default function ChatArea({
             }}
             disabled={!canChat || isTyping}
             placeholder={
-              !canChat ? "Upload a file or select materials to start chatting..." :
-              isTyping ? "Wait for response..." :
-              selectedTask ? "Ask a question about this assignment..." : "Ask anything about your uploaded files or selected materials..."
+              !canChat
+                ? (hasOnlyExternalLinks
+                    ? "Upload the assignment file above to start chatting..."
+                    : "Upload a file or select materials to start chatting...")
+                : isTyping ? "Wait for response..."
+                : selectedTask ? "Ask a question about this assignment..."
+                : "Ask anything about your uploaded files or selected materials..."
             }
             className="w-full px-6 pt-5 pb-2 rounded-[1.5rem] bg-transparent text-[#08060d] dark:text-[#f3f4f6] focus:outline-none text-[16px] border-none resize-none overflow-y-auto custom-scrollbar max-h-[300px]"
           />

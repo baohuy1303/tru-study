@@ -99,8 +99,8 @@ def _retrieve_chunks(
             print(f"[responder] Failed to embed query '{query[:50]}...': {e}")
             continue
 
-        # Search course materials collection
-        if course_id:
+        # Search course materials collection (course_id=0 is valid for freeform uploads)
+        if course_id is not None:
             try:
                 collection = get_course_materials_collection(course_id)
                 if collection.count() > 0:
@@ -228,7 +228,8 @@ def responder(state: GraphState) -> dict:
     t0 = time.time()
     
     queries = state.get("retrieval_queries", [])
-    course_id = state.get("effective_course_id") or state.get("course_id")
+    _eff = state.get("effective_course_id")
+    course_id = _eff if _eff is not None else state.get("course_id")
     assignment_id = state.get("assignment_id")
     context_mode = state.get("context_mode", "inject")
     mode = state.get("mode", "neutral")

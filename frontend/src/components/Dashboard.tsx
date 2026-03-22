@@ -21,6 +21,32 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [todoPlans, setTodoPlans] = useState<Map<string, TodoItem[]>>(new Map());
   const patchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Map of task_id -> uploaded file for link-only assignment main file persistence
+  const [assignmentUploadsMap, setAssignmentUploadsMap] = useState<Map<number, any>>(new Map());
+
+  // Load persisted assignment uploads on mount
+  useEffect(() => {
+    const map = new Map<number, any>();
+    Object.keys(localStorage)
+      .filter(k => k.startsWith('assignment_upload_'))
+      .forEach(k => {
+        const id = parseInt(k.replace('assignment_upload_', ''));
+        if (!isNaN(id)) {
+          try { map.set(id, JSON.parse(localStorage.getItem(k)!)); } catch {}
+        }
+      });
+    if (map.size > 0) setAssignmentUploadsMap(map);
+  }, []);
+
+  const handleAssignmentFileUploaded = useCallback((taskId: number, uploadData: any) => {
+    setAssignmentUploadsMap(prev => {
+      const next = new Map(prev);
+      next.set(taskId, uploadData);
+      return next;
+    });
+    localStorage.setItem(`assignment_upload_${taskId}`, JSON.stringify(uploadData));
+  }, []);
+
   // Map of topic_id -> { id, title, path?, file_name? }
   const [checkedTopicsMap, setCheckedTopicsMap] = useState<Map<number, any>>(new Map());
 
@@ -140,11 +166,15 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     Object.keys(localStorage)
       .filter(k => k.startsWith('chat_'))
       .forEach(k => localStorage.removeItem(k));
+    Object.keys(localStorage)
+      .filter(k => k.startsWith('assignment_upload_'))
+      .forEach(k => localStorage.removeItem(k));
 
     // Reset all in-memory state
     setSelectedTask(null);
     setCheckedTopicsMap(new Map());
     setTodoPlans(new Map());
+    setAssignmentUploadsMap(new Map());
     setTasksOpen(true);
     setResetKey(k => k + 1);
   };
@@ -202,6 +232,8 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           resetKey={resetKey}
           onLinkTopicReplaced={handleLinkTopicReplaced}
           onTaskPlanReceived={handleTaskPlanReceived}
+          assignmentUploadsMap={assignmentUploadsMap}
+          onAssignmentFileUploaded={handleAssignmentFileUploaded}
         />
       </main>
 

@@ -138,8 +138,10 @@ def material_fetcher(state: GraphState) -> dict:
 
     user_topics = state.get("user_selected_topics") or []
 
-    # Skip entirely if cached AND no user-selected topics to process
-    if state.get("embedded_materials") is not None and not user_topics:
+    supp_uploads_pending = state.get("supplementary_uploads") or []
+
+    # Skip entirely if cached AND no user-selected topics AND no supplementary uploads to process
+    if state.get("embedded_materials") is not None and not user_topics and not supp_uploads_pending:
         print("[material_fetcher] Skipping -- materials already cached, no new selections")
         return {"pipeline_log": log_step(state, "material_fetcher", "skipped", "materials already cached", time.time() - t0)}
 
@@ -153,9 +155,83 @@ def material_fetcher(state: GraphState) -> dict:
 
     # In freeform mode org_unit_id may be 0, but topics carry their own orgUnitId
     has_topics_with_org = any(t.get("orgUnitId") for t in user_topics)
-    if not org_unit_id and not has_topics_with_org:
+    if not org_unit_id and not has_topics_with_org and not supp_uploads_pending:
         print("[material_fetcher] Missing org_unit_id and no topics with orgUnitId, skipping")
         return {"embedded_materials": [], "materials_metadata": {}, "inaccessible_topics": [], "too_long_videos": [], "effective_course_id": 0, "pipeline_log": log_step(state, "material_fetcher", "error", "missing org_unit_id", time.time() - t0)}
+
+    # If cached but only supplementary uploads to process: skip catalog fetch entirely
+    if state.get("embedded_materials") is not None and not user_topics and supp_uploads_pending:
+        print(f"[material_fetcher] Cache hit but {len(supp_uploads_pending)} supplementary upload(s) need processing")
+        try:
+            existing_embedded = list(state["embedded_materials"])
+            effective_course_id = course_id if course_id is not None else 0
+            collection = get_course_materials_collection(effective_course_id)
+            manifest = load_manifest(effective_course_id)
+            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+            embeddings_model = _get_embeddings()
+            new_names = []
+            for upload in supp_uploads_pending:
+                path = upload.get("path", "")
+                title = upload.get("file_name", "uploaded_file")
+                file_id = upload.get("file_id", title)
+                if title in manifest:
+                    print(f"  [skip] Supplementary '{title}' already in manifest")
+                    if title not in existing_embedded:
+                        existing_embedded.append(title)
+                    continue
+                if is_video_file(title):
+                    print(f"  [skip] Supplementary video '{title}' -- handle on first turn")
+                    continue
+                try:
+                    with open(path, "rb") as fh:
+                        raw_bytes = fh.read()
+                    text = extract_text_from_bytes(raw_bytes)
+                    if len(text.strip()) < 100:
+                        text = extract_text_with_ocr_bytes(raw_bytes)
+                    if not text:
+                        continue
+                    chunks = splitter.split_text(text)
+                    if not chunks or not collection:
+                        continue
+                    vectors = embeddings_model.embed_documents(chunks)
+                    content_hash = hashlib.md5(raw_bytes).hexdigest()
+                    collection.upsert(
+                        ids=[f"material_{effective_course_id}_{file_id}_chunk_{i}" for i in range(len(chunks))],
+                        documents=chunks,
+                        embeddings=vectors,
+                        metadatas=[{"source": title, "course_id": str(effective_course_id),
+                                   "material_type": "user-upload", "chunk_index": i,
+                                   "topic_id": str(file_id)} for i in range(len(chunks))],
+                    )
+                    manifest[title] = {"topic_id": file_id, "content_hash": content_hash,
+                                       "chunk_count": len(chunks), "embedded_at": datetime.now(timezone.utc).isoformat()}
+                    existing_embedded.append(title)
+                    new_names.append(title)
+                    print(f"  [embedded] Supplementary '{title}' -- {len(chunks)} chunks")
+                except Exception as e:
+                    print(f"  [error] Failed to embed supplementary '{title}': {e}")
+            if effective_course_id is not None and manifest:
+                save_manifest(effective_course_id, manifest)
+            elapsed = time.time() - t0
+            detail = f"{len(new_names)} supplementary embedded"
+            return {
+                "embedded_materials": existing_embedded,
+                "materials_metadata": manifest,
+                "inaccessible_topics": [],
+                "too_long_videos": [],
+                "effective_course_id": effective_course_id,
+                "pipeline_log": log_step(state, "material_fetcher", "done", detail, elapsed),
+            }
+        except Exception as e:
+            print(f"[material_fetcher] Error processing supplementary uploads: {e}")
+            return {
+                "embedded_materials": list(state.get("embedded_materials") or []),
+                "materials_metadata": {},
+                "inaccessible_topics": [],
+                "too_long_videos": [],
+                "effective_course_id": course_id or 0,
+                "pipeline_log": log_step(state, "material_fetcher", "error", str(e), time.time() - t0),
+            }
 
     # If cached but user added new topics: skip catalog fetch + fuzzy match, only process user selections
     if state.get("embedded_materials") is not None and user_topics:
@@ -163,9 +239,9 @@ def material_fetcher(state: GraphState) -> dict:
         try:
             existing_embedded = list(state["embedded_materials"])
             # In freeform mode, use first topic's orgUnitId as fallback for collection/manifest
-            effective_course_id = course_id or next((t.get("orgUnitId") for t in user_topics if t.get("orgUnitId")), 0)
-            collection = get_course_materials_collection(effective_course_id) if effective_course_id else None
-            manifest = load_manifest(effective_course_id) if effective_course_id else {}
+            effective_course_id = course_id if course_id is not None else next((t.get("orgUnitId") for t in user_topics if t.get("orgUnitId")), 0)
+            collection = get_course_materials_collection(effective_course_id)
+            manifest = load_manifest(effective_course_id)
             splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
             embeddings_model = _get_embeddings()
             new_names = []
@@ -311,7 +387,50 @@ def material_fetcher(state: GraphState) -> dict:
                 except Exception as e:
                     print(f"  [error] Failed to embed local file '{title}': {e}")
 
-            if effective_course_id and manifest:
+            # Process supplementary uploaded files (from pdf_parser) in the fast-path
+            for upload in supp_uploads_pending:
+                path = upload.get("path", "")
+                title = upload.get("file_name", "uploaded_file")
+                file_id = upload.get("file_id", title)
+                if title in manifest:
+                    print(f"  [skip] Supplementary '{title}' already in manifest")
+                    if title not in existing_embedded:
+                        existing_embedded.append(title)
+                    continue
+                if is_video_file(title):
+                    print(f"  [skip] Supplementary video '{title}' skipped in fast-path (process via full path on first turn)")
+                    continue
+                try:
+                    with open(path, "rb") as fh:
+                        raw_bytes = fh.read()
+                    text = extract_text_from_bytes(raw_bytes)
+                    if len(text.strip()) < 100:
+                        text = extract_text_with_ocr_bytes(raw_bytes)
+                    if not text:
+                        print(f"  [skip] Could not extract text from supplementary '{title}'")
+                        continue
+                    chunks = splitter.split_text(text)
+                    if not chunks or not collection:
+                        continue
+                    vectors = embeddings_model.embed_documents(chunks)
+                    content_hash = hashlib.md5(raw_bytes).hexdigest()
+                    collection.upsert(
+                        ids=[f"material_{effective_course_id}_{file_id}_chunk_{i}" for i in range(len(chunks))],
+                        documents=chunks,
+                        embeddings=vectors,
+                        metadatas=[{"source": title, "course_id": str(effective_course_id),
+                                   "material_type": "user-upload", "chunk_index": i,
+                                   "topic_id": str(file_id)} for i in range(len(chunks))],
+                    )
+                    manifest[title] = {"topic_id": file_id, "content_hash": content_hash,
+                                       "chunk_count": len(chunks), "embedded_at": datetime.now(timezone.utc).isoformat()}
+                    existing_embedded.append(title)
+                    new_names.append(title)
+                    print(f"  [embedded] Supplementary '{title}' -- {len(chunks)} chunks")
+                except Exception as e:
+                    print(f"  [error] Failed to embed supplementary '{title}': {e}")
+
+            if effective_course_id is not None and manifest:
                 save_manifest(effective_course_id, manifest)
 
             elapsed = time.time() - t0
@@ -337,7 +456,7 @@ def material_fetcher(state: GraphState) -> dict:
             }
 
     references = state.get("material_references") or []
-    if not references and not user_topics:
+    if not references and not user_topics and not supp_uploads_pending:
         print("[material_fetcher] No material references to fetch")
         return {"embedded_materials": [], "materials_metadata": {}, "inaccessible_topics": [], "too_long_videos": [], "effective_course_id": 0, "pipeline_log": log_step(state, "material_fetcher", "done", "no references", time.time() - t0)}
 
@@ -354,7 +473,7 @@ def material_fetcher(state: GraphState) -> dict:
             if not catalog and not user_topics:
                 print("[material_fetcher] Empty content catalog -- token may be expired or user lacks access.")
                 return {"embedded_materials": [], "materials_metadata": {}, "inaccessible_topics": [], "too_long_videos": [], "effective_course_id": effective_course_id, "pipeline_log": log_step(state, "material_fetcher", "warning", "api returned no content", time.time() - t0)}
-        elif not user_topics:
+        elif not user_topics and not supp_uploads_pending:
             print("[material_fetcher] No org_unit_id and no user topics, skipping")
             return {"embedded_materials": [], "materials_metadata": {}, "inaccessible_topics": [], "too_long_videos": [], "effective_course_id": 0, "pipeline_log": log_step(state, "material_fetcher", "done", "freeform, no topics", time.time() - t0)}
 
@@ -412,9 +531,9 @@ def material_fetcher(state: GraphState) -> dict:
             print("[material_fetcher] No materials matched above threshold")
             return {"embedded_materials": [], "materials_metadata": {}, "inaccessible_topics": inaccessible_topics, "too_long_videos": [], "effective_course_id": effective_course_id, "pipeline_log": log_step(state, "material_fetcher", "done", "0 matched", time.time() - t0)}
 
-        # Step 3: Check Chroma + manifest for dedup
-        collection = get_course_materials_collection(effective_course_id) if effective_course_id else None
-        manifest = load_manifest(effective_course_id) if effective_course_id else {}
+        # Step 3: Check Chroma + manifest for dedup (effective_course_id=0 is valid for freeform)
+        collection = get_course_materials_collection(effective_course_id)
+        manifest = load_manifest(effective_course_id)
         to_embed = []
 
         for item in matched:
@@ -594,8 +713,8 @@ def material_fetcher(state: GraphState) -> dict:
             except Exception as e:
                 print(f"  [error] Failed to embed supplementary '{title}': {e}")
 
-        # Step 7: Save manifest
-        if effective_course_id and manifest:
+        # Step 7: Save manifest (effective_course_id=0 is valid for freeform)
+        if effective_course_id is not None and manifest:
             save_manifest(effective_course_id, manifest)
 
         all_embedded = [m["title"] for m in matched if m["title"] in manifest] + [

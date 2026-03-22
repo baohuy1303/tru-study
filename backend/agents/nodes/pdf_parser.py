@@ -55,7 +55,11 @@ def pdf_parser(state: GraphState) -> dict:
     # Skip if pipeline state is already cached (multi-turn)
     if state.get("assignment_summary") and state.get("assignment_token_count") is not None:
         print("[pdf_parser] Skipping -- cached state available")
+        # Still re-derive supplementary_uploads from current request so stale state is cleared
+        uploaded_files = state.get("uploaded_files") or []
+        current_supplementary = [f for f in uploaded_files if not f.get("is_main")]
         return {
+            "supplementary_uploads": current_supplementary,
             "pipeline_log": log_step(state, "pdf_parser", "skipped", "cached state available"),
         }
 
@@ -173,8 +177,7 @@ def pdf_parser(state: GraphState) -> dict:
     if too_long_videos:
         result["too_long_videos"] = state.get("too_long_videos", []) + too_long_videos
 
-    # Pass supplementary uploads forward for material_fetcher
-    if supplementary_uploads:
-        result["supplementary_uploads"] = supplementary_uploads
+    # Always set supplementary_uploads (even empty) to clear stale LangGraph state from prior turns
+    result["supplementary_uploads"] = supplementary_uploads
 
     return result
