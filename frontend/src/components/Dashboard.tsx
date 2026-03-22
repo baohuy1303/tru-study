@@ -18,9 +18,10 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [tasksOpen, setTasksOpen] = useState(true);
   const [resetKey, setResetKey] = useState(0);
   const [clearDataModal, setClearDataModal] = useState<'none' | 'chats' | 'storage'>('none');
-  const [isAddAllModalOpen, setIsAddAllModalOpen] = useState(false);
+   const [isAddAllModalOpen, setIsAddAllModalOpen] = useState(false);
   const [addingAllLoading, setAddingAllLoading] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const { session } = useSession();
 
   // Map of session_id -> TodoItem[] for AI-generated to-do lists
@@ -73,7 +74,8 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     if (map.size > 0) setReplacedLinksMap(map);
   }, []);
 
-  const handleTaskSelect = (course_id: any, task_id: any, type: string, course_name?: string) => {
+   const handleTaskSelect = (course_id: any, task_id: any, type: string, course_name?: string) => {
+    if (isProcessing) return;
     setCheckedTopicsMap(new Map());
     
     if (!course_id) {
@@ -292,22 +294,28 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
               <HelpCircle size={18} strokeWidth={2.5} />
             </button>
           </div>
-          <div className="flex items-center gap-2">
+           <div className="flex items-center gap-2">
             <button
               onClick={() => setClearDataModal('chats')}
-              className="p-1.5 hover:bg-rose-100 dark:hover:bg-rose-900/30 text-[#6b6375] hover:text-rose-500 dark:text-[#9ca3af] dark:hover:text-rose-400 rounded-lg transition-colors cursor-pointer"
-              title="Clear all chat sessions"
+              disabled={isProcessing}
+              className={`p-1.5 hover:bg-rose-100 dark:hover:bg-rose-900/30 text-[#6b6375] hover:text-rose-500 dark:text-[#9ca3af] dark:hover:text-rose-400 rounded-lg transition-colors flex items-center justify-center ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+              title={isProcessing ? "Processing..." : "Clear all chat sessions"}
             >
               <Trash2 size={16} strokeWidth={2.5} />
             </button>
             <button
               onClick={() => setClearDataModal('storage')}
-              className="p-1.5 hover:bg-amber-100 dark:hover:bg-amber-900/30 text-[#6b6375] hover:text-amber-600 dark:text-[#9ca3af] dark:hover:text-amber-400 rounded-lg transition-colors cursor-pointer"
-              title="Wipe heavy storage (uploads, embeddings)"
+              disabled={isProcessing}
+              className={`p-1.5 hover:bg-amber-100 dark:hover:bg-amber-900/30 text-[#6b6375] hover:text-amber-600 dark:text-[#9ca3af] dark:hover:text-amber-400 rounded-lg transition-colors flex items-center justify-center ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+              title={isProcessing ? "Processing..." : "Wipe heavy storage (uploads, embeddings)"}
             >
               <Database size={16} strokeWidth={2.5} />
             </button>
-            <button onClick={onLogout} className="text-sm font-medium text-[#6b6375] dark:text-[#9ca3af] hover:text-[#08060d] dark:hover:text-white transition-colors cursor-pointer text-right">
+            <button 
+              onClick={onLogout} 
+              disabled={isProcessing}
+              className={`text-sm font-medium text-[#6b6375] dark:text-[#9ca3af] hover:text-[#08060d] dark:hover:text-white transition-colors text-right ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+            >
               Logout
             </button>
           </div>
@@ -347,9 +355,10 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           onTaskPlanReceived={handleTaskPlanReceived}
           assignmentUploadsMap={assignmentUploadsMap}
           onAssignmentFileUploaded={handleAssignmentFileUploaded}
-          onAutoOpenTodo={handleAutoOpenTodo}
+           onAutoOpenTodo={handleAutoOpenTodo}
           onClearTodos={handleClearTodos}
           onOpenHelp={() => setIsHelpOpen(true)}
+          onProcessingChange={setIsProcessing}
         />
       </main>
 
@@ -366,10 +375,11 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
               </SignInButton>
             </SignedOut>
             <SignedIn>
-              <button
-                onClick={() => setIsAddAllModalOpen(true)}
-                className="p-1 min-w-[24px] min-h-[24px] flex items-center justify-center rounded-md bg-[#f4f3ec] hover:bg-[#e5e4e7] dark:bg-[#3f414d] dark:hover:bg-[#4b4e5b] text-[#aa3bff] dark:text-[#c084fc] transition-colors shadow-sm cursor-pointer border border-transparent dark:border-[#2e303a]"
-                title="Add all to Google Calendar"
+               <button
+                onClick={() => !isProcessing && setIsAddAllModalOpen(true)}
+                disabled={isProcessing}
+                className={`p-1 min-w-[24px] min-h-[24px] flex items-center justify-center rounded-md bg-[#f4f3ec] hover:bg-[#e5e4e7] dark:bg-[#3f414d] dark:hover:bg-[#4b4e5b] text-[#aa3bff] dark:text-[#c084fc] transition-colors shadow-sm border border-transparent dark:border-[#2e303a] ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                title={isProcessing ? "Processing..." : "Add all to Google Calendar"}
               >
                 <CalendarPlus size={14} />
               </button>
@@ -380,13 +390,14 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
             <PanelRightClose size={20} className="text-[#6b6375] dark:text-[#9ca3af]" />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 bg-[#f4f3ec]/40 dark:bg-[#16171d]/40 custom-scrollbar whitespace-nowrap">
+         <div className="flex-1 overflow-y-auto p-4 bg-[#f4f3ec]/40 dark:bg-[#16171d]/40 custom-scrollbar whitespace-nowrap">
           <TasksSidebar 
             selectedTask={selectedTask} 
             onTaskSelect={handleTaskSelect} 
             todoPlans={todoPlans} 
             onTodosChange={handleTodosChange} 
             autoOpenSessionId={Array.from(initialTodoSessions).pop()}
+            disabled={isProcessing}
           />
         </div>
       </aside>

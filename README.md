@@ -1,116 +1,118 @@
-# TruStudy — Agent Architecture
+# TruStudy
 
-TruStudy uses a **LangGraph StateGraph** pipeline to process university assignments and answer student questions with grounded, RAG-backed responses. Every chat message flows through the full pipeline; nodes skip work when results are already cached from a prior turn.
+An AI study assistant built specifically for Truman State University students. TruStudy connects directly to Brightspace — your actual courses, your actual assignments — and answers questions grounded in the real course materials, not hallucinated summaries.
 
 ---
 
-## Pipeline Diagram
+## Inspiration
 
-```mermaid
-flowchart TD
-    START([User Message]) --> PP
+We've all used AI for assignments, but the process is broken. You're manually downloading files, watching endless lecture videos just to find the relevant part, copy-pasting into ChatGPT, hitting context limits, and starting over. I built TruStudy because I wanted something me and other Truman students could actually use — something that knows your course, reads your assignments, and finds the right material automatically.
 
-    PP["**pdf_parser**\nExtract text from instructions,\nPDF attachments, uploaded files,\nvideo transcripts (Whisper)"]
+---
 
-    PP --> TG{Token Gate}
-    TG -- "< threshold\n(inject mode)" --> SCH
-    TG -- "≥ threshold\n(RAG mode)" --> LCH
+## Why It Matters
 
-    SCH["**small_context_handler**\nInject full text into context\nGenerate exhaustive LLM summary"]
-    LCH["**large_context_handler**\nGenerate concise LLM summary\nChunk + embed → assignment_{id} (ChromaDB)"]
+Most AI study tools are general-purpose — they don't know your professor, your syllabus, or what chapter your exam covers next week. Students end up doing the heavy lifting themselves: finding the right files, manually downloading everything, trimming them down to fit a context window, and hoping the AI doesn't hallucinate a citation that doesn't exist.
 
-    SCH --> ME
-    LCH --> ME
+TruStudy closes that gap. It knows your course because it reads it directly. Answers are grounded in the actual documents your professor uploaded — not training data from two years ago. That's the difference between a tool that helps you learn and one that just sounds like it does.
 
-    ME["**material_extractor**\nLLM structured output\nFind referenced chapters, slides, labs\nin assignment text"]
+---
 
-    ME --> TP
+## What It Does
 
-    TP["**task_planner**\nLLM structured output\nGenerate ordered to-do checklist\nfor the student (first turn only)"]
+- **Brightspace integration** — logs in via Truman CAS SSO and reads your real course content: assignments, instructions, attachments, and the full course material tree
+- **Automatic material discovery** — analyzes your assignment and autonomously fetches the referenced textbook chapters, lecture slides, and lab documents from Brightspace
+- **Multi-format parsing** — handles PDFs (with OCR fallback for scanned documents), Word docs, PowerPoints, and video lectures (transcribed via Whisper)
+- **RAG-backed answers** — chunks and embeds course materials into a local vector database; answers are grounded in actual retrieved content, not guesses
+- **AI-generated task checklist** — breaks down every assignment into an actionable to-do list on first open
+- **Multi-turn memory** — expensive pipeline work (parsing, embedding, extraction) runs once per assignment and is cached; follow-up questions are fast
+- **Three study modes** — Learning (Socratic guidance), Buddy (conversational help), Lazy (direct answers)
+- **Manual override** — select specific course materials from the sidebar, or upload files directly when Brightspace links point to external sources
 
-    TP --> MF
+---
 
-    MF["**material_fetcher**\nFuzzy-match references → Brightspace\ncontent tree (rapidfuzz, threshold 60)\nDownload + chunk + embed new files\n→ course_materials_{id} (ChromaDB)\nAlso processes supplementary uploads\nand sidebar-selected topics"]
+## How I Built It
 
-    MF --> QR
+The core is a **LangGraph multi-agent pipeline** — a directed graph of specialized nodes sharing typed state. Each node does one job: extract text, summarize, find material references, fetch and embed them, rewrite queries, retrieve and respond.
 
-    QR["**query_rewriter**\nLLM generates 2–3 semantically\ndiverse retrieval queries from\nprompt + summary + chat history"]
+I started by reverse-engineering the Brightspace Valence REST API since there was no official SDK for what I needed. Authentication runs through Playwright automating Truman's CAS SSO login to intercept the Bearer token. From there, all course content is accessible via the LP/LE API endpoints.
 
-    QR --> R
+The pipeline uses ChromaDB for local vector storage, OpenAI for embeddings and generation, and fuzzy string matching (rapidfuzz) to map LLM-extracted material references to actual files in the Brightspace content tree. The FastAPI backend streams pipeline progress back to the React frontend via SSE so the user can watch each step execute in real time.
 
-    R["**responder**\nMulti-query ChromaDB retrieval\nfrom course_materials + assignment\ncollections. Dedup + rank chunks.\nToken-budgeted message assembly.\nLLM response in Learning / Buddy / Lazy mode"]
+See [AI_ARCHITECTURE.md](AI_ARCHITECTURE.md) for the full pipeline diagram and node breakdown.
 
-    R --> END([Streaming Response])
+---
 
-    style PP fill:#1e1e2e,stroke:#aa3bff,color:#f3f4f6
-    style SCH fill:#1e1e2e,stroke:#aa3bff,color:#f3f4f6
-    style LCH fill:#1e1e2e,stroke:#aa3bff,color:#f3f4f6
-    style ME fill:#1e1e2e,stroke:#aa3bff,color:#f3f4f6
-    style TP fill:#1e1e2e,stroke:#aa3bff,color:#f3f4f6
-    style MF fill:#1e1e2e,stroke:#aa3bff,color:#f3f4f6
-    style QR fill:#1e1e2e,stroke:#aa3bff,color:#f3f4f6
-    style R fill:#1e1e2e,stroke:#aa3bff,color:#f3f4f6
-    style TG fill:#2e2e3e,stroke:#c084fc,color:#f3f4f6
-    style START fill:#aa3bff,stroke:#aa3bff,color:#fff
-    style END fill:#aa3bff,stroke:#aa3bff,color:#fff
+## Tech Stack
+
+| Layer | Technologies |
+|---|---|
+| Frontend | React, TypeScript, Tailwind CSS, Vite |
+| Backend | Python, FastAPI, LangGraph, LangChain |
+| AI / ML | OpenAI GPT-4o, text-embedding-3-small, Whisper |
+| Vector DB | ChromaDB (local persistent) |
+| Auth | Playwright (Truman CAS SSO automation) |
+| LMS | Brightspace Valence REST API (LP 1.57, LE 1.92) |
+| Parsing | PyMuPDF, python-docx, OCR fallback, rapidfuzz |
+
+---
+
+## How to Run
+
+**Prerequisites:** Node.js, Python 3.11+, a Truman SSO account, OpenAI API key.
+
+**Backend**
+```bash
+cd backend
+python -m venv venv
+source venv/Scripts/activate      # Windows/Git Bash
+pip install -r requirements.txt
+# Create backend/.env with BS_USER, BS_PASS, OPENAI_API_KEY
+uvicorn app:app --reload
 ```
 
----
+**Frontend**
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-## Shared State
-
-All nodes read from and write to a single `GraphState` TypedDict. LangGraph merges each node's returned dict into the shared state — nodes only return the keys they modify.
-
-Key state fields:
-
-| Field | Set by | Used by |
-|---|---|---|
-| `assignment_text` | `pdf_parser` | `context_handler`, `material_extractor` |
-| `assignment_summary` | `context_handler` | `task_planner`, `query_rewriter`, `responder` |
-| `context_mode` (`inject`/`rag`) | `context_handler` | `responder` |
-| `material_references` | `material_extractor` | `material_fetcher` |
-| `task_plan` | `task_planner` | cached in session, returned to frontend |
-| `supplementary_uploads` | `pdf_parser` | `material_fetcher` |
-| `user_selected_topics` | request input | `material_fetcher` |
-| `embedded_materials` | `material_fetcher` | cached in session |
-| `effective_course_id` | `material_fetcher` | `responder` |
-| `retrieval_queries` | `query_rewriter` | `responder` |
-| `response` | `responder` | returned to frontend |
+Open `http://localhost:5173`. Both servers must run simultaneously.
 
 ---
 
-## Multi-Turn Caching
+## Challenges
 
-On the first message for an assignment, the full pipeline runs. Expensive results are persisted in a JSON session file (`storage/sessions/{session_id}.json`):
+**Brightspace API** — The documentation is sparse and students don't have access to admin-level endpoints (everything under `/orgstructure/` returns 403). I had to reverse-engineer the token interception flow using Playwright and work around the missing endpoints with name-prefix heuristics for course filtering.
 
-- `assignment_text`, `assignment_summary`, `assignment_token_count`, `context_mode`
-- `material_references`, `embedded_materials`
-- `task_plan`
+**Pipeline design under time pressure** — Designing a pipeline that is both fast and accurate is genuinely hard. I went through several iterations on the drawing board before committing to the LangGraph approach. Keeping track of what state flows where, what gets cached, what gets re-derived — it becomes a nightmare without a clear architecture diagram.
 
-On subsequent turns, `pdf_parser` and `context_handler` detect the cached summary and skip extraction and embedding entirely. `material_fetcher` skips re-downloading already-embedded materials (deduped by manifest + ChromaDB metadata).
+**Content diversity** — Different professors upload things completely differently: some use PDFs, some use links to Google Drive, some embed videos directly, some use scanned image-PDFs. Getting the parser to handle all of these gracefully (OCR fallback, Whisper transcription, external link detection) took significant iteration.
 
-`uploaded_files` and `supplementary_uploads` are **not** cached — they are re-derived from the request on every turn so uploads are always current.
+**Video parsing** — Integrating Whisper with size and duration limits, handling the async/sync threading mismatch under Windows uvicorn, and making sure videos that are too long surface a useful message to the user rather than silently failing.
 
----
-
-## ChromaDB Collections
-
-| Collection | Contains | Queried by |
-|---|---|---|
-| `assignment_{id}` | Chunked assignment text (RAG mode only) | `responder` |
-| `course_materials_{course_id}` | Course files, selected topics, supplementary uploads | `responder` |
-| `course_materials_0` | Freeform uploads (no assignment selected) | `responder` |
-
-> **Gotcha:** `effective_course_id = 0` for freeform mode. All guards must use `is not None` checks — `if course_id:` treats 0 as falsy and silently skips retrieval.
+**Observability** — A complex multi-node pipeline fails silently in really confusing ways. Adding structured pipeline logging (every node emits a trace entry with status, duration, and detail) and streaming it to the frontend was one of the best decisions I made — it turned debugging from guesswork into something systematic.
 
 ---
 
-## Response Modes
+## Accomplishments
 
-The `responder` node switches system prompts based on the `mode` field in the request:
+The pipeline actually works, and it works well. I handed it to a few friends to test today — they pointed it at their real assignments and it gave them accurate, grounded answers on the first try. Building something that solves a real problem for real users in a hackathon timeframe is satisfying.
 
-| Mode | Behavior |
-|---|---|
-| `learning` | Socratic — asks what the student already knows, nudges rather than answers |
-| `neutral` (Buddy) | Helpful and conversational, occasionally checks understanding |
-| `lazy` | Gives the answer directly with minimal explanation |
+Being able to move fast on unfamiliar APIs — reading Brightspace docs, designing the agent architecture, wiring everything together — and ship a working product under pressure was a good test of what I've learned.
+
+---
+
+## What I Learned
+
+**Divide and conquer** — breaking the problem into discrete, testable nodes made the complexity manageable. **Observability from day one** — logging and pipeline tracing saved enormous debugging time. **Validate early** — I had multiple API integrations and pipeline stages fail in ways I didn't expect; writing integration tests and checking outputs at each step prevented those failures from compounding. **Resist feature creep** — knowing what to cut and what to keep is the hardest skill when you're building fast.
+
+---
+
+## What's Next
+
+- Stronger retrieval with better embedding models and larger top-k windows
+- PDF and video previews inline in the chat
+- Cloud storage (currently everything is local — ChromaDB, uploads, session files)
+- Broader university support beyond Truman State

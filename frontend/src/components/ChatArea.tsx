@@ -40,6 +40,7 @@ export default function ChatArea({
   onAutoOpenTodo,
   onClearTodos,
   onOpenHelp,
+  onProcessingChange,
 }: {
   selectedTask: any,
   onClearTask: () => void,
@@ -52,6 +53,7 @@ export default function ChatArea({
   onAutoOpenTodo?: (sessionId: string) => void,
   onClearTodos?: (sessionId: string) => void,
   onOpenHelp?: () => void,
+  onProcessingChange?: (isProcessing: boolean) => void,
 }) {
   const [taskDetails, setTaskDetails] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -59,6 +61,11 @@ export default function ChatArea({
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  
+  useEffect(() => {
+    onProcessingChange?.(isTyping);
+  }, [isTyping, onProcessingChange]);
+
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [mode, setMode] = useState<'learning' | 'neutral' | 'lazy'>('neutral');
   const [streamingSteps, setStreamingSteps] = useState<string[]>([]);
@@ -532,18 +539,20 @@ export default function ChatArea({
               <div className="flex flex-col md:flex-row md:items-start justify-between gap-6 mb-8">
                 <div className="flex items-start gap-5 flex-1 min-w-0">
                   <div className="flex items-center gap-2 mt-1 shrink-0">
-                    <button
+                     <button
                        onClick={onClearTask}
-                       className="p-2.5 bg-[#f4f3ec] hover:bg-[#e5e4e7] dark:bg-[#2e303a] dark:hover:bg-[#3f414d] text-[#6b6375] dark:text-[#9ca3af] rounded-xl transition-colors flex items-center justify-center cursor-pointer"
-                       title="Close Assignment View"
+                       disabled={isTyping}
+                       className={`p-2.5 bg-[#f4f3ec] hover:bg-[#e5e4e7] dark:bg-[#2e303a] dark:hover:bg-[#3f414d] text-[#6b6375] dark:text-[#9ca3af] rounded-xl transition-colors flex items-center justify-center ${isTyping ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                       title={isTyping ? "Processing..." : "Close Assignment View"}
                     >
                       <X size={20} strokeWidth={2.5} />
                     </button>
                     {messages.length > 0 && (
                       <button
                         onClick={handleClearChat}
-                        className="p-2.5 bg-[#f4f3ec] hover:bg-rose-100 dark:bg-[#2e303a] dark:hover:bg-rose-900/30 text-[#6b6375] hover:text-rose-500 dark:text-[#9ca3af] dark:hover:text-rose-400 rounded-xl transition-colors flex items-center justify-center cursor-pointer"
-                        title="Clear chat history"
+                        disabled={isTyping}
+                        className={`p-2.5 bg-[#f4f3ec] hover:bg-rose-100 dark:bg-[#2e303a] dark:hover:bg-rose-900/30 text-[#6b6375] hover:text-rose-500 dark:text-[#9ca3af] dark:hover:text-rose-400 rounded-xl transition-colors flex items-center justify-center ${isTyping ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                        title={isTyping ? "Processing..." : "Clear chat history"}
                       >
                         <Trash2 size={18} strokeWidth={2.5} />
                       </button>
@@ -761,11 +770,11 @@ export default function ChatArea({
                                   COPY
                                 </button>
                               </div>
-                              <SyntaxHighlighter
+                               <SyntaxHighlighter
                                 style={vscDarkPlus as any}
                                 language={match[1]}
                                 PreTag="div"
-                                customStyle={{ margin: 0, padding: '1.25rem', background: '#1e1e1e', fontSize: '14px', lineHeight: '1.5' }}
+                                customStyle={{ margin: 0, padding: '1.25rem 1.25rem 1.75rem 1.25rem', background: '#1e1e1e', fontSize: '14px', lineHeight: '1.5' }}
                                 {...props}
                               >
                                 {String(children).replace(/\n$/, '')}
@@ -791,7 +800,7 @@ export default function ChatArea({
                     <Terminal size={10} className="opacity-70" />
                     Trace
                   </span>
-                  <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap scrollbar-none">
+                  <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap scrollbar-none pb-2 custom-scrollbar">
                     {msg.pipelineLog!.map((log: any, idx: number) => (
                       <div key={idx} className="flex items-center text-[10px]">
                         {log.status === 'done' && <span className="text-emerald-500 font-bold mr-0.5 animate-in fade-in zoom-in-50 duration-500">✓</span>}

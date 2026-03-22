@@ -24,12 +24,13 @@ interface TodoItem {
   order: number;
 }
 
-export default function TasksSidebar({ selectedTask, onTaskSelect, todoPlans, onTodosChange, autoOpenSessionId }: {
+export default function TasksSidebar({ selectedTask, onTaskSelect, todoPlans, onTodosChange, autoOpenSessionId, disabled }: {
   selectedTask?: any,
   onTaskSelect: (courseId: any, taskId: any, type: string, courseName?: string) => void,
   todoPlans?: Map<string, TodoItem[]>,
   onTodosChange?: (sessionId: string, todos: TodoItem[]) => void,
   autoOpenSessionId?: string,
+  disabled?: boolean,
 }) {
   const [work, setWork] = useState<CourseWork[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -258,22 +259,23 @@ export default function TasksSidebar({ selectedTask, onTaskSelect, todoPlans, on
                 return (
                   <div
                     key={`${task.type}-${task.id}-${i}`}
-                    className={`rounded-2xl shadow-[0_4px_12px_rgba(0,0,0,0.03)] border transition-all ${
+                     className={`rounded-2xl shadow-[0_4px_12px_rgba(0,0,0,0.03)] border transition-all ${
                       isSelected
                         ? 'bg-[#f4f3ec] dark:bg-[#2e303a] border-[#aa3bff] dark:border-[#c084fc] ring-1 ring-[#aa3bff] dark:ring-[#c084fc]'
                         : 'bg-white dark:bg-[#1f2028] border-[#e5e4e7] dark:border-[#2e303a] hover:border-[#aa3bff] dark:hover:border-[#c084fc]'
-                    }`}
+                    } ${disabled ? 'opacity-75' : ''}`}
                   >
                     {/* Task card (clickable) */}
-                    <div
+                     <div
                       onClick={() => {
+                        if (disabled) return;
                         if (isSelected) {
                           onTaskSelect(null, null, '', undefined);
                         } else {
                           onTaskSelect(course.course_id, task.id, task.type, course.course_name);
                         }
                       }}
-                      className={`p-5 cursor-pointer group ${!isSelected ? 'hover:-translate-y-0.5' : ''} transition-all`}
+                      className={`p-5 group ${!isSelected && !disabled ? 'hover:-translate-y-0.5' : ''} ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'} transition-all`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex-1 min-w-0">
@@ -297,10 +299,10 @@ export default function TasksSidebar({ selectedTask, onTaskSelect, todoPlans, on
                         </div>
                         
                         <button
-                          onClick={(e) => handleAddToCalendar(e, task, course.course_name)}
-                          disabled={addingToCal === String(task.id)}
-                          className="flex items-center justify-center p-1.5 rounded bg-[#f4f3ec] hover:bg-[#e5e4e7] dark:bg-[#3f414d] dark:hover:bg-[#4b4e5b] text-[#aa3bff] dark:text-[#c084fc] transition-colors"
-                          title="Add to Google Calendar"
+                          onClick={(e) => !disabled && handleAddToCalendar(e, task, course.course_name)}
+                          disabled={addingToCal === String(task.id) || disabled}
+                          className={`flex items-center justify-center p-1.5 rounded bg-[#f4f3ec] hover:bg-[#e5e4e7] dark:bg-[#3f414d] dark:hover:bg-[#4b4e5b] text-[#aa3bff] dark:text-[#c084fc] transition-colors ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          title={disabled ? "Processing..." : "Add to Google Calendar"}
                         >
                           {addingToCal === String(task.id) ? (
                             <Loader2 size={14} className="animate-spin" />
@@ -315,9 +317,9 @@ export default function TasksSidebar({ selectedTask, onTaskSelect, todoPlans, on
                     {task.type === 'assignment' && todos.length > 0 && (
                       <div className="px-5 pb-5">
                         <div className="pt-3 border-t border-[#e5e4e7] dark:border-[#2e303a]">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); toggleExpanded(sessionId); }}
-                            className="w-full flex items-center gap-2 text-xs font-bold text-[#6b6375] dark:text-[#9ca3af] hover:text-[#aa3bff] dark:hover:text-[#c084fc] transition-colors cursor-pointer select-none"
+                           <button
+                             onClick={(e) => { e.stopPropagation(); if (!disabled) toggleExpanded(sessionId); }}
+                            className={`w-full flex items-center gap-2 text-xs font-bold text-[#6b6375] dark:text-[#9ca3af] ${!disabled ? 'hover:text-[#aa3bff] dark:hover:text-[#c084fc]' : 'cursor-not-allowed'} transition-colors select-none`}
                           >
                             <ChevronDown size={14} className={`transition-transform duration-200 shrink-0 ${isExpanded ? 'rotate-0' : '-rotate-90'}`} />
                             <span className="uppercase tracking-widest">To-Do</span>
@@ -334,11 +336,12 @@ export default function TasksSidebar({ selectedTask, onTaskSelect, todoPlans, on
                             <div className="mt-3 space-y-1.5">
                               {todos.map((item, idx) => (
                                 <div key={item.id} className="flex items-start gap-2 group/item">
-                                  <input
+                                   <input
                                     type="checkbox"
                                     checked={item.completed}
-                                    onChange={() => toggleTodo(sessionId, item.id)}
-                                    className="w-3.5 h-3.5 rounded text-[#aa3bff] focus:ring-[#aa3bff] border-[#e5e4e7] dark:border-[#3f414d] dark:bg-[#1f2028] mt-0.5 shrink-0 cursor-pointer"
+                                    onChange={() => !disabled && toggleTodo(sessionId, item.id)}
+                                    disabled={disabled}
+                                    className={`w-3.5 h-3.5 rounded text-[#aa3bff] focus:ring-[#aa3bff] border-[#e5e4e7] dark:border-[#3f414d] dark:bg-[#1f2028] mt-0.5 shrink-0 ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}
                                   />
                                   {editingId === item.id ? (
                                     <div className="flex-1 flex items-center gap-1">
@@ -390,19 +393,20 @@ export default function TasksSidebar({ selectedTask, onTaskSelect, todoPlans, on
                                   )}
                                 </div>
                               ))}
-                              {/* Add new item */}
-                              <div className="flex items-center gap-2 mt-2 pt-2 border-t border-[#f4f3ec] dark:border-[#2e303a]">
+                               {/* Add new item */}
+                              <div className={`flex items-center gap-2 mt-2 pt-2 border-t border-[#f4f3ec] dark:border-[#2e303a] ${disabled ? 'opacity-50' : ''}`}>
                                 <Plus size={12} className="text-[#aa3bff] dark:text-[#c084fc] shrink-0" />
                                 <input
-                                  placeholder="Add a step..."
+                                  placeholder={disabled ? "Processing..." : "Add a step..."}
                                   value={newItemTexts.get(sessionId) || ''}
-                                  onChange={(e) => setNewItemTexts(prev => {
+                                  disabled={disabled}
+                                  onChange={(e) => !disabled && setNewItemTexts(prev => {
                                     const next = new Map(prev);
                                     next.set(sessionId, e.target.value);
                                     return next;
                                   })}
-                                  onKeyDown={(e) => { if (e.key === 'Enter') addTodo(sessionId); }}
-                                  className="flex-1 text-xs bg-transparent outline-none placeholder:text-[#6b6375]/50 dark:placeholder:text-[#9ca3af]/50 text-[#08060d] dark:text-[#f3f4f6]"
+                                  onKeyDown={(e) => { if (e.key === 'Enter' && !disabled) addTodo(sessionId); }}
+                                  className={`flex-1 text-xs bg-transparent outline-none placeholder:text-[#6b6375]/50 dark:placeholder:text-[#9ca3af]/50 text-[#08060d] dark:text-[#f3f4f6] ${disabled ? 'cursor-not-allowed' : ''}`}
                                 />
                               </div>
                             </div>
