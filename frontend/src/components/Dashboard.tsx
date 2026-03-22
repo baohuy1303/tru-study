@@ -175,9 +175,33 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     setCheckedTopicsMap(new Map());
     setTodoPlans(new Map());
     setAssignmentUploadsMap(new Map());
+    setInitialTodoSessions(new Set());
     setTasksOpen(true);
     setResetKey(k => k + 1);
   };
+
+  const handleClearTodos = useCallback((sessionId: string) => {
+    setTodoPlans(prev => {
+      const next = new Map(prev);
+      next.delete(sessionId);
+      return next;
+    });
+    setInitialTodoSessions(prev => {
+      const next = new Set(prev);
+      next.delete(sessionId);
+      return next;
+    });
+  }, []);
+
+  const [initialTodoSessions, setInitialTodoSessions] = useState<Set<string>>(new Set());
+
+  const handleAutoOpenTodo = useCallback((sessionId: string) => {
+    if (!initialTodoSessions.has(sessionId)) {
+      setTasksOpen(true);
+      setInitialTodoSessions(prev => new Set(prev).add(sessionId));
+      // The TasksSidebar will handle auto-expanding the to-do list via its expandedTodos state
+    }
+  }, [initialTodoSessions]);
 
   return (
     <div className="flex h-screen bg-[#f4f3ec] text-[#08060d] dark:bg-[#16171d] dark:text-[#f3f4f6] overflow-hidden text-left font-sans max-w-none w-full border-none">
@@ -234,6 +258,8 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           onTaskPlanReceived={handleTaskPlanReceived}
           assignmentUploadsMap={assignmentUploadsMap}
           onAssignmentFileUploaded={handleAssignmentFileUploaded}
+          onAutoOpenTodo={handleAutoOpenTodo}
+          onClearTodos={handleClearTodos}
         />
       </main>
 
@@ -246,7 +272,13 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-4 bg-[#f4f3ec]/40 dark:bg-[#16171d]/40 custom-scrollbar whitespace-nowrap">
-          <TasksSidebar selectedTask={selectedTask} onTaskSelect={handleTaskSelect} todoPlans={todoPlans} onTodosChange={handleTodosChange} />
+          <TasksSidebar 
+            selectedTask={selectedTask} 
+            onTaskSelect={handleTaskSelect} 
+            todoPlans={todoPlans} 
+            onTodosChange={handleTodosChange} 
+            autoOpenSessionId={Array.from(initialTodoSessions).pop()}
+          />
         </div>
       </aside>
 

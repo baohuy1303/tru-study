@@ -23,11 +23,12 @@ interface TodoItem {
   order: number;
 }
 
-export default function TasksSidebar({ selectedTask, onTaskSelect, todoPlans, onTodosChange }: {
+export default function TasksSidebar({ selectedTask, onTaskSelect, todoPlans, onTodosChange, autoOpenSessionId }: {
   selectedTask?: any,
   onTaskSelect: (courseId: any, taskId: any, type: string, courseName?: string) => void,
   todoPlans?: Map<string, TodoItem[]>,
   onTodosChange?: (sessionId: string, todos: TodoItem[]) => void,
+  autoOpenSessionId?: string,
 }) {
   const [work, setWork] = useState<CourseWork[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -49,6 +50,17 @@ export default function TasksSidebar({ selectedTask, onTaskSelect, todoPlans, on
     }
     loadWork();
   }, []);
+
+  useEffect(() => {
+    if (autoOpenSessionId) {
+      setExpandedTodos(prev => {
+        if (prev.has(autoOpenSessionId)) return prev;
+        const next = new Set(prev);
+        next.add(autoOpenSessionId);
+        return next;
+      });
+    }
+  }, [autoOpenSessionId]);
 
   // Helper: get session_id for a task within a course
   const getSessionId = (courseId: number | string, taskId: number | string) => `${courseId}_${taskId}`;

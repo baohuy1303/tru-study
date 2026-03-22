@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../lib/api';
-import { FileText, Link as LinkIcon, Download, Clock, X, Terminal, Loader2, Send, Trash2, Paperclip, Pin, AlertTriangle, ExternalLink, Video, GraduationCap, Zap, Brain } from 'lucide-react';
+import { FileText, Link as LinkIcon, Download, Clock, X, Terminal, Loader2, Send, Trash2, Paperclip, Pin, AlertTriangle, ExternalLink, Video, GraduationCap, Zap, Brain, ArrowUp, ArrowDown } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -28,6 +28,8 @@ export default function ChatArea({
   onTaskPlanReceived,
   assignmentUploadsMap,
   onAssignmentFileUploaded,
+  onAutoOpenTodo,
+  onClearTodos,
 }: {
   selectedTask: any,
   onClearTask: () => void,
@@ -37,6 +39,8 @@ export default function ChatArea({
   onTaskPlanReceived?: (sessionId: string, plan: any[]) => void,
   assignmentUploadsMap?: Map<number, any>,
   onAssignmentFileUploaded?: (taskId: number, uploadData: any) => void,
+  onAutoOpenTodo?: (sessionId: string) => void,
+  onClearTodos?: (sessionId: string) => void,
 }) {
   const [taskDetails, setTaskDetails] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -57,7 +61,11 @@ export default function ChatArea({
   const [tooLongVideos, setTooLongVideos] = useState<any[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  
+  const [canScrollDown, setCanScrollDown] = useState(false);
+  const [canScrollUp, setCanScrollUp] = useState(false);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -71,8 +79,22 @@ export default function ChatArea({
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
+  const scrollToTop = () => {
+    scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleScroll = () => {
+    if (scrollContainerRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
+      setCanScrollUp(scrollTop > 100);
+      setCanScrollDown(scrollHeight - (scrollTop + clientHeight) > 100);
+    }
+  };
+
   useEffect(() => {
     scrollToBottom();
+    // After messages change, update scroll buttons (must wait for render)
+    setTimeout(handleScroll, 100);
   }, [messages, isTyping]);
 
   // Reset uploaded files, inaccessible topics, and too-long videos when task changes
@@ -177,6 +199,9 @@ export default function ChatArea({
       setTooLongVideos([]);
       if (selectedTask) {
         localStorage.removeItem(`chat_${selectedTask.task_id}`);
+        // Also clear todos from frontend state
+        const sid = sessionId || `${selectedTask.org_unit_id}_${selectedTask.task_id}`;
+        onClearTodos?.(sid);
       }
     } catch (e) {
       console.error("Failed to clear backend session", e);
@@ -396,6 +421,7 @@ export default function ChatArea({
                     }
                     if (data.task_plan?.length > 0 && data.session_id) {
                       onTaskPlanReceived?.(data.session_id, data.task_plan);
+                      onAutoOpenTodo?.(data.session_id);
                     }
                   }
                 } catch(e) {
@@ -418,10 +444,37 @@ export default function ChatArea({
   };
 
   return (
-    <div className="flex-1 flex flex-col w-full h-full overflow-hidden">
+    <div className="flex-1 flex flex-col w-full h-full overflow-hidden relative">
+      {/* Scroll Buttons */}
+      <div className="absolute bottom-36 right-8 z-[60] flex flex-col items-end pointer-events-none gap-2">
+        <button
+           onClick={scrollToTop}
+           className={`p-3 bg-white/90 dark:bg-[#1f2028]/90 text-[#aa3bff] dark:text-[#c084fc] rounded-full shadow-xl border border-[#e5e4e7] dark:border-[#2e303a] transition-all duration-300 backdrop-blur-md cursor-pointer hover:scale-110 active:scale-95
+             ${canScrollUp 
+               ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto' 
+               : 'opacity-0 translate-y-4 scale-90 pointer-events-none'}`}
+           title="Scroll to top"
+        >
+          <ArrowUp size={22} strokeWidth={2.5} />
+        </button>
+        <button
+           onClick={scrollToBottom}
+           className={`p-3 bg-white/90 dark:bg-[#1f2028]/90 text-[#aa3bff] dark:text-[#c084fc] rounded-full shadow-xl border border-[#e5e4e7] dark:border-[#2e303a] transition-all duration-300 backdrop-blur-md cursor-pointer hover:scale-110 active:scale-95
+             ${canScrollDown 
+               ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto' 
+               : 'opacity-0 -translate-y-4 scale-90 pointer-events-none'}`}
+           title="Scroll to bottom"
+        >
+          <ArrowDown size={22} strokeWidth={2.5} />
+        </button>
+      </div>
 
       {/* Top Section: Task Details & Chat History */}
-      <div className="flex-1 overflow-y-auto w-full custom-scrollbar flex flex-col pb-6">
+      <div 
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto w-full custom-scrollbar flex flex-col pb-6"
+      >
         {!selectedTask && messages.length === 0 && uploadedFiles.length === 0 && selectedTopics.length === 0 && (
           <div className="flex-1 flex flex-col justify-center items-center text-center opacity-80 mt-20 p-8 w-full max-w-4xl mx-auto shrink-0">
             <h2 className="text-4xl font-semibold text-[#08060d] dark:text-[#f3f4f6] tracking-tight m-0 mb-3">
@@ -498,22 +551,47 @@ export default function ChatArea({
 
               {/* External link warning + upload slot */}
               {hasOnlyExternalLinks && (
-                <div className="mt-8 p-5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-2xl">
-                  <div className="flex items-start gap-3 mb-3">
-                    <AlertTriangle size={18} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" strokeWidth={2.5} />
-                    <div>
-                      <p className="text-sm font-bold text-amber-800 dark:text-amber-200 mb-1">External assignment file detected</p>
-                      <p className="text-sm text-amber-700 dark:text-amber-300">
-                        This assignment links to an external file (e.g. Google Drive or Docs). We may not be able to download it automatically. Upload the file manually below for best results.
-                      </p>
+                !hasUploadedMainFile ? (
+                  <div className="mt-8 p-5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-2xl">
+                    <div className="flex items-start gap-3 mb-3">
+                      <AlertTriangle size={18} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" strokeWidth={2.5} />
+                      <div>
+                        <p className="text-sm font-bold text-amber-800 dark:text-amber-200 mb-1">External assignment file detected</p>
+                        <p className="text-sm text-amber-700 dark:text-amber-300">
+                          This assignment links to an external file (e.g. Google Drive or Docs). We may not be able to download it automatically. Upload the file manually below for best results.
+                        </p>
+                      </div>
+                    </div>
+                    <label className="inline-flex items-center gap-2 px-4 py-2 bg-amber-100 dark:bg-amber-800/40 hover:bg-amber-200 dark:hover:bg-amber-700/50 text-amber-800 dark:text-amber-200 rounded-xl text-sm font-semibold cursor-pointer transition-colors border border-amber-200 dark:border-amber-700">
+                      <Paperclip size={14} strokeWidth={2.5} />
+                      Upload assignment file
+                      <input type="file" className="hidden" accept=".pdf,.doc,.docx,.txt,.pptx,.ppt,.mp4,.mov,.webm,.mkv,.avi" onChange={handleAssignmentBannerUpload} />
+                    </label>
+                  </div>
+                ) : (
+                  <div className="mt-8 p-5 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 rounded-2xl">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-800/40 flex items-center justify-center shrink-0">
+                          <FileText size={20} className="text-emerald-600 dark:text-emerald-400" />
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-bold text-emerald-800 dark:text-emerald-200 mb-0.5 tracking-widest uppercase opacity-80">Uploaded Main File</p>
+                          <p className="text-[15px] font-semibold text-emerald-950 dark:text-emerald-50">
+                            {uploadedFiles.find(f => f.is_main)?.file_name}
+                          </p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => handleRemoveFile(uploadedFiles.find(f => f.is_main)!.file_id)} 
+                        className="p-2.5 hover:bg-white dark:hover:bg-[#1f2028] bg-emerald-100/50 dark:bg-emerald-800/30 text-emerald-700 dark:text-emerald-300 hover:text-rose-500 rounded-xl transition-all cursor-pointer shadow-sm border border-transparent hover:border-emerald-200 dark:hover:border-emerald-700"
+                        title="Remove file"
+                      >
+                        <Trash2 size={16} strokeWidth={2.5} />
+                      </button>
                     </div>
                   </div>
-                  <label className="inline-flex items-center gap-2 px-4 py-2 bg-amber-100 dark:bg-amber-800/40 hover:bg-amber-200 dark:hover:bg-amber-700/50 text-amber-800 dark:text-amber-200 rounded-xl text-sm font-semibold cursor-pointer transition-colors border border-amber-200 dark:border-amber-700">
-                    <Paperclip size={14} strokeWidth={2.5} />
-                    Upload assignment file
-                    <input type="file" className="hidden" accept=".pdf,.doc,.docx,.txt,.pptx,.ppt,.mp4,.mov,.webm,.mkv,.avi" onChange={handleAssignmentBannerUpload} />
-                  </label>
-                </div>
+                )
               )}
 
               {/* Attachments */}
@@ -732,9 +810,9 @@ export default function ChatArea({
       <div className="p-8 pt-0 w-full max-w-4xl mx-auto shrink-0 mt-auto bg-[#f4f3ec] dark:bg-[#16171d] relative">
 
         {/* Uploaded files row */}
-        {uploadedFiles.length > 0 && (
+        {uploadedFiles.filter(f => !(selectedTask?.type === 'assignment' && hasOnlyExternalLinks && f.is_main)).length > 0 && (
           <div className="mb-3 flex flex-wrap gap-2">
-            {uploadedFiles.map(f => (
+            {uploadedFiles.filter(f => !(selectedTask?.type === 'assignment' && hasOnlyExternalLinks && f.is_main)).map(f => (
               <div
                 key={f.file_id}
                 className={`inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-xl text-[12px] font-semibold border transition-all ${
