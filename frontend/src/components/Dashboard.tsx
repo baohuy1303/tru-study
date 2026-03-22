@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import Sidebar from './Sidebar';
 import TasksSidebar from './TasksSidebar';
 import ChatArea from './ChatArea';
-import { PanelRightOpen, PanelRightClose, Trash2, AlertTriangle, Database, CalendarPlus, Loader2 } from 'lucide-react';
+import { PanelRightOpen, PanelRightClose, Trash2, AlertTriangle, Database, CalendarPlus, Loader2, HelpCircle, X } from 'lucide-react';
 import { SignInButton, SignedIn, SignedOut, UserButton, useSession } from '@clerk/clerk-react';
 import api from '../lib/api';
 
@@ -20,6 +20,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [clearDataModal, setClearDataModal] = useState<'none' | 'chats' | 'storage'>('none');
   const [isAddAllModalOpen, setIsAddAllModalOpen] = useState(false);
   const [addingAllLoading, setAddingAllLoading] = useState(false);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
   const { session } = useSession();
 
   // Map of session_id -> TodoItem[] for AI-generated to-do lists
@@ -281,7 +282,16 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
       {/* Left Sidebar: Course Navigation */}
       <aside className="w-80 shrink-0 border-r border-[#e5e4e7] dark:border-[#2e303a] bg-white dark:bg-[#1f2028] flex flex-col h-full shadow-[rgba(0,0,0,0.05)_2px_0_8px_-2px] z-20">
         <div className="p-4 border-b border-[#e5e4e7] dark:border-[#2e303a] flex items-center justify-between shrink-0">
-          <h1 className="text-xl font-bold tracking-tight text-[#aa3bff] dark:text-[#c084fc] m-0">TruStudy</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold tracking-tight text-[#aa3bff] dark:text-[#c084fc] m-0">TruStudy</h1>
+            <button
+              onClick={() => setIsHelpOpen(true)}
+              className="p-1 hover:bg-[#f4f3ec] dark:hover:bg-[#3f414d] text-[#6b6375] hover:text-[#aa3bff] dark:text-[#9ca3af] dark:hover:text-[#c084fc] rounded-lg transition-colors cursor-pointer"
+              title="How to use TruStudy"
+            >
+              <HelpCircle size={18} strokeWidth={2.5} />
+            </button>
+          </div>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setClearDataModal('chats')}
@@ -339,6 +349,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           onAssignmentFileUploaded={handleAssignmentFileUploaded}
           onAutoOpenTodo={handleAutoOpenTodo}
           onClearTodos={handleClearTodos}
+          onOpenHelp={() => setIsHelpOpen(true)}
         />
       </main>
 
@@ -472,6 +483,127 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
                 className="flex-1 py-3 px-4 flex justify-center items-center gap-2 bg-[#aa3bff] hover:bg-[#902ee6] text-white rounded-xl font-semibold transition-colors shadow-lg cursor-pointer disabled:opacity-50"
               >
                 {addingAllLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Yes, Add All'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Help Modal */}
+      {isHelpOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#1f2028] border border-[#e5e4e7] dark:border-[#2e303a] rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl animate-in zoom-in-95 duration-200 overflow-hidden">
+            
+            {/* Header */}
+            <div className="px-8 py-6 flex items-center justify-between gap-4 shrink-0 border-b border-[#e5e4e7] dark:border-[#2e303a] bg-white dark:bg-[#1f2028]">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-[#f4f3ec] dark:bg-[#3f414d] flex items-center justify-center shrink-0">
+                  <HelpCircle size={24} className="text-[#aa3bff] dark:text-[#c084fc]" strokeWidth={2.5} />
+                </div>
+                <h3 className="text-xl font-bold text-[#08060d] dark:text-[#f3f4f6]">
+                  Welcome to TruStudy
+                </h3>
+              </div>
+              <button onClick={() => setIsHelpOpen(false)} className="p-2 text-[#6b6375] hover:text-rose-500 rounded-lg transition-colors cursor-pointer"><X size={20} /></button>
+            </div>
+            
+            {/* Scrollable Content */}
+            <div className="px-8 py-6 overflow-y-auto custom-scrollbar text-[#6b6375] dark:text-[#9ca3af] leading-relaxed space-y-6">
+              
+              <section>
+                <h4 className="text-[#08060d] dark:text-[#f3f4f6] font-bold text-lg mb-2 flex items-center gap-2">✨ Why TruStudy?</h4>
+                <p className="mb-3">TruStudy eliminates the friction between your school's LMS and modern AI tools. Instead of manually downloading PDFs and pasting them into ChatGPT, TruStudy brings the AI directly to your assignments.</p>
+                <ul className="space-y-3">
+                  <li className="flex items-start gap-2">
+                    <span className="text-[#aa3bff] font-bold mt-0.5">•</span>
+                    <div><strong className="text-[#08060d] dark:text-[#e5e4e7]">Automatic Context Retrieval (RAG):</strong> Searching inside documents is entirely automatic! The AI searches directly inside your actual course materials (slides, syllabi, and even video-based lectures) to get the materials referenced in your assignment. No need to download or upload files manually. And if needed, you can explicitly select which topics/files you want the AI to embed into its knowledge base.</div>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-[#aa3bff] font-bold mt-0.5">•</span>
+                    <div><strong className="text-[#08060d] dark:text-[#e5e4e7]">Video & External Link Mastery:</strong> External links are handled gracefully! Whether it is a PDF, a webpage, or even a lecture video inside your course materials, TruStudy can parse and extract the content directly so you can study seamlessly across any medium.</div>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-[#aa3bff] font-bold mt-0.5">•</span>
+                    <div><strong className="text-[#08060d] dark:text-[#e5e4e7]">Smart Assignment Sync:</strong> Securely fetches all your pending assignments and quizzes directly from Brightspace into a clean dashboard.</div>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-[#aa3bff] font-bold mt-0.5">•</span>
+                    <div><strong className="text-[#08060d] dark:text-[#e5e4e7]">Instant To-Do Lists:</strong> Click a single button to have the AI digest complex rubrics and output a step-by-step interactive checklist. Edit, rearrange, and check off items.</div>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-[#aa3bff] font-bold mt-0.5">•</span>
+                    <div><strong className="text-[#08060d] dark:text-[#e5e4e7]">Google Calendar Automation:</strong> Connect your Google account to automatically block out 2-hour study sessions for every pending assignment with zero manual data entry.</div>
+                  </li>
+                </ul>
+              </section>
+
+              <div className="h-px bg-[#e5e4e7] dark:bg-[#2e303a] w-full my-6"></div>
+
+              <section>
+                <h4 className="text-[#08060d] dark:text-[#f3f4f6] font-bold text-lg mb-4 flex items-center gap-2">🚀 Quick Start Guide</h4>
+                <div className="space-y-4">
+                  <div className="flex gap-3">
+                    <div className="w-6 h-6 rounded-full bg-[#aa3bff] text-white flex items-center justify-center font-bold text-sm shrink-0 mt-0.5 shadow-md">1</div>
+                    <div>
+                      <h5 className="font-bold text-[#08060d] dark:text-[#f3f4f6]">Generate an Auto To-Do List</h5>
+                      <p className="text-[#6b6375] dark:text-[#9ca3af] text-[13px] mt-1 leading-relaxed">Select a pending assignment from the right sidebar. Click to open it, then click <strong className="text-[#aa3bff] dark:text-[#c084fc]">Generate Action Plan</strong> to let the AI instantly digest the rubric into an interactive timeline.</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="w-6 h-6 rounded-full bg-[#aa3bff] text-white flex items-center justify-center font-bold text-sm shrink-0 mt-0.5 shadow-md">2</div>
+                    <div>
+                      <h5 className="font-bold text-[#08060d] dark:text-[#f3f4f6]">Select Course Materials (RAG)</h5>
+                      <p className="text-[#6b6375] dark:text-[#9ca3af] text-[13px] mt-1 leading-relaxed">Open the left sidebar. Under "Knowledge Base", check the boxes next to any Brightspace files or weeks you want the AI to read. Close the sidebar, and any questions you ask will automatically search ONLY those materials!</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="w-6 h-6 rounded-full bg-[#aa3bff] text-white flex items-center justify-center font-bold text-sm shrink-0 mt-0.5 shadow-md">3</div>
+                    <div>
+                      <h5 className="font-bold text-[#08060d] dark:text-[#f3f4f6]">Summarize Lecture Videos</h5>
+                      <p className="text-[#6b6375] dark:text-[#9ca3af] text-[13px] mt-1 leading-relaxed">Don't want to watch a 2-hour lecture? Simply click the lecture videos in your course materials or click the <strong className="text-[#aa3bff] dark:text-[#c084fc]">Paperclip Icon</strong> in the bottom chat bar to safely upload video files (.mp4, .mov, etc). The Agent will automatically transcribe and use as a knowledge base to answer your questions.
+                      <br/><br/>
+                      <span className="italic block bg-[#fefce8] dark:bg-yellow-900/20 p-2 rounded-lg border border-yellow-200 dark:border-yellow-900/30">
+                        <strong>Current Limit:</strong> Transcription is currently optimized for clips up to <strong>10 minutes</strong>. We are actively working on a chunking system to support 2-hour lectures very soon!
+                      </span>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <div className="h-px bg-[#e5e4e7] dark:bg-[#2e303a] w-full my-6"></div>
+
+              <section>
+                <h4 className="text-[#08060d] dark:text-[#f3f4f6] font-bold text-lg mb-3 flex items-center gap-2">💡 Quick Use Cases</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-4 bg-[#f4f3ec]/50 dark:bg-[#16171d]/50 rounded-xl border border-[#e5e4e7] dark:border-[#2e303a]">
+                    <h5 className="font-bold text-[#aa3bff] dark:text-[#c084fc] mb-1">The Speed Runner</h5>
+                    <p className="text-sm">Want to auto-solve the assignment and just submit it? Switch the AI to <strong>Lazy Mode</strong> and watch it do all the heavy lifting instantly.</p>
+                  </div>
+                  <div className="p-4 bg-[#f4f3ec]/50 dark:bg-[#16171d]/50 rounded-xl border border-[#e5e4e7] dark:border-[#2e303a]">
+                    <h5 className="font-bold text-[#aa3bff] dark:text-[#c084fc] mb-1">The Deep Dive</h5>
+                    <p className="text-sm">Truly want to grasp the concepts? Swap to <strong>Learn Mode</strong> and let the AI guide you through an interactive breakdown of your video lectures.</p>
+                  </div>
+                  <div className="p-4 bg-[#f4f3ec]/50 dark:bg-[#16171d]/50 rounded-xl border border-[#e5e4e7] dark:border-[#2e303a]">
+                    <h5 className="font-bold text-[#aa3bff] dark:text-[#c084fc] mb-1">The Study Planner</h5>
+                    <p className="text-sm">Tap the <strong>Add All</strong> Calendar icon in the Pending Tasks panel to automatically map out your week with Google Calendar study blocks.</p>
+                  </div>
+                  <div className="p-4 bg-[#f4f3ec]/50 dark:bg-[#16171d]/50 rounded-xl border border-[#e5e4e7] dark:border-[#2e303a]">
+                    <h5 className="font-bold text-[#aa3bff] dark:text-[#c084fc] mb-1">The Clean Slate</h5>
+                    <p className="text-sm">Done for the semester? Click the <strong>Database (Storage)</strong> icon in the sidebar to securely wipe all heavy Vector Embeddings from your local storage.</p>
+                  </div>
+                </div>
+              </section>
+
+            </div>
+            
+            {/* Footer */}
+            <div className="px-8 py-5 border-t border-[#e5e4e7] dark:border-[#2e303a] flex justify-end shrink-0 bg-[#f4f3ec]/30 dark:bg-[#1f2028]">
+              <button
+                onClick={() => setIsHelpOpen(false)}
+                className="py-2.5 px-8 bg-[#aa3bff] hover:bg-[#902ee6] text-white rounded-xl font-semibold transition-colors shadow-lg shadow-[#aa3bff]/25 cursor-pointer"
+              >
+                Let's Get Started!
               </button>
             </div>
           </div>

@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../lib/api';
-import { FileText, Link as LinkIcon, Download, Clock, X, Terminal, Loader2, Send, Trash2, Paperclip, Pin, AlertTriangle, ExternalLink, Video, GraduationCap, Zap, Brain, ArrowUp, ArrowDown } from 'lucide-react';
+import { FileText, Link as LinkIcon, Download, Clock, X, Terminal, Loader2, Send, Trash2, Paperclip, Pin, AlertTriangle, ExternalLink, Video, GraduationCap, Zap, Brain, ArrowUp, ArrowDown, HelpCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
@@ -19,6 +22,12 @@ interface UploadedFile {
   is_main: boolean;
 }
 
+const preprocessMath = (content: string) => {
+  let processed = content.replace(/\\\[(.*?)\\\]/gs, '$$$$$1$$$$');
+  processed = processed.replace(/\\\((.*?)\\\)/gs, '$$$1$$');
+  return processed;
+};
+
 export default function ChatArea({
   selectedTask,
   onClearTask,
@@ -30,6 +39,7 @@ export default function ChatArea({
   onAssignmentFileUploaded,
   onAutoOpenTodo,
   onClearTodos,
+  onOpenHelp,
 }: {
   selectedTask: any,
   onClearTask: () => void,
@@ -41,6 +51,7 @@ export default function ChatArea({
   onAssignmentFileUploaded?: (taskId: number, uploadData: any) => void,
   onAutoOpenTodo?: (sessionId: string) => void,
   onClearTodos?: (sessionId: string) => void,
+  onOpenHelp?: () => void,
 }) {
   const [taskDetails, setTaskDetails] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -481,14 +492,29 @@ export default function ChatArea({
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto w-full custom-scrollbar flex flex-col pb-6"
       >
-        {!selectedTask && messages.length === 0 && uploadedFiles.length === 0 && selectedTopics.length === 0 && (
-          <div className="flex-1 flex flex-col justify-center items-center text-center opacity-80 mt-20 p-8 w-full max-w-4xl mx-auto shrink-0">
+        {!selectedTask && messages.length === 0 && uploadedFiles.length === 0 && selectedTopics.length === 0 && !loading && (
+          <div className="flex-1 flex flex-col justify-center items-center text-center mt-10 p-8 w-full max-w-4xl mx-auto shrink-0 animate-in fade-in zoom-in-95 duration-700">
+            <div className="w-20 h-20 bg-white dark:bg-[#1f2028] border border-[#e5e4e7] dark:border-[#2e303a] rounded-3xl shadow-xl flex items-center justify-center mx-auto text-[#aa3bff] dark:text-[#c084fc] mb-6">
+              <GraduationCap size={40} strokeWidth={2} />
+            </div>
             <h2 className="text-4xl font-semibold text-[#08060d] dark:text-[#f3f4f6] tracking-tight m-0 mb-3">
               What do you want to learn today?
             </h2>
-            <p className="text-lg text-[#6b6375] dark:text-[#9ca3af] m-0">
+            <p className="text-md text-[#6b6375] dark:text-[#9ca3af] m-0 max-w-lg mx-auto">
               Select an assignment on the right, pick course materials from the left, or upload your own files below.
             </p>
+            <div className="mt-8 space-y-3 w-full max-w-sm mx-auto">
+              <button
+                onClick={onOpenHelp}
+                className="w-full py-3.5 px-6 bg-[#aa3bff] hover:bg-[#902ee6] text-white rounded-2xl font-bold transition-all shadow-lg shadow-[#aa3bff]/20 hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
+              >
+                <HelpCircle size={18} strokeWidth={2.5} />
+                Read the Quick Start Guide
+              </button>
+              <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[#6b6375]/50 dark:text-[#9ca3af]/40">
+                New users are highly encouraged to read it!
+              </p>
+            </div>
           </div>
         )}
 
@@ -702,9 +728,9 @@ export default function ChatArea({
             </div>
           </div>
         )}
-
+        
         {/* Chat Thread */}
-        <div className="w-full max-w-4xl mx-auto px-4 lg:px-8 space-y-6 shrink-0 pb-4">
+        <div className={`w-full max-w-4xl mx-auto px-4 lg:px-8 space-y-6 shrink-0 pb-4 ${messages.length === 0 ? 'hidden' : ''}`}>
           {messages.map((msg, i) => (
             <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
               <div
@@ -719,7 +745,8 @@ export default function ChatArea({
                 ) : (
                   <div className="prose dark:prose-invert max-w-none text-[#08060d] dark:text-[#f3f4f6] break-words overflow-x-hidden text-[15px] leading-[1.6]">
                     <ReactMarkdown 
-                      remarkPlugins={[remarkGfm]}
+                      remarkPlugins={[remarkGfm, remarkMath]}
+                      rehypePlugins={[rehypeKatex]}
                       components={{
                         code({ node, inline, className, children, ...props }: any) {
                           const match = /language-(\w+)/.exec(className || '');
@@ -752,7 +779,7 @@ export default function ChatArea({
                         }
                       }}
                     >
-                      {msg.content}
+                      {preprocessMath(msg.content)}
                     </ReactMarkdown>
                   </div>
                 )}
