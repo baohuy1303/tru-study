@@ -158,15 +158,15 @@ export default function TasksSidebar({ selectedTask, onTaskSelect, todoPlans, on
       const token = await session.getToken();
       
       let start = new Date();
-      let end = new Date(start.getTime() + 60 * 60 * 1000);
+      let end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
       
       if (task.due_date) {
         end = new Date(task.due_date);
-        start = new Date(end.getTime() - 60 * 60 * 1000); // 1 hour block ending at due date
+        start = new Date(end.getTime() - 2 * 60 * 60 * 1000); // 2 hour block ending at due date
         // If due date is already passed or too close, fallback to starting from now
         if (start.getTime() < Date.now()) {
             start = new Date();
-            end = new Date(start.getTime() + 60 * 60 * 1000);
+            end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
         }
       }
 

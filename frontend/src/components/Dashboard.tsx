@@ -2,8 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import Sidebar from './Sidebar';
 import TasksSidebar from './TasksSidebar';
 import ChatArea from './ChatArea';
-import { PanelRightOpen, PanelRightClose, Trash2, AlertTriangle, Database } from 'lucide-react';
-import { SignInButton, SignedIn, SignedOut, UserButton } from '@clerk/clerk-react';
+import { PanelRightOpen, PanelRightClose, Trash2, AlertTriangle, Database, CalendarPlus, Loader2 } from 'lucide-react';
+import { SignInButton, SignedIn, SignedOut, UserButton, useSession } from '@clerk/clerk-react';
 import api from '../lib/api';
 
 interface TodoItem {
@@ -18,6 +18,9 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [tasksOpen, setTasksOpen] = useState(true);
   const [resetKey, setResetKey] = useState(0);
   const [clearDataModal, setClearDataModal] = useState<'none' | 'chats' | 'storage'>('none');
+  const [isAddAllModalOpen, setIsAddAllModalOpen] = useState(false);
+  const [addingAllLoading, setAddingAllLoading] = useState(false);
+  const { session } = useSession();
 
   // Map of session_id -> TodoItem[] for AI-generated to-do lists
   const [todoPlans, setTodoPlans] = useState<Map<string, TodoItem[]>>(new Map());
@@ -214,6 +217,54 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     });
   }, []);
 
+  const handleAddAllToCalendar = async () => {
+    if (!session) return;
+    setAddingAllLoading(true);
+    try {
+      const workRes = await api.get('/dashboard/work');
+      const workData = workRes.data;
+      
+      const token = await session.getToken();
+      let addedCount = 0;
+
+      for (const course of workData) {
+        const tasks = [...course.assignments, ...course.quizzes];
+        for (const task of tasks) {
+          let start = new Date();
+          let end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
+          
+          if (task.due_date) {
+            end = new Date(task.due_date);
+            start = new Date(end.getTime() - 2 * 60 * 60 * 1000);
+            if (start.getTime() < Date.now()) {
+                start = new Date();
+                end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
+            }
+          }
+
+          try {
+            await api.post('/add-event', {
+              summary: `${course.course_name}: ${task.name}`,
+              description: `Automatically added from TruStudy.\nTask Type: ${task.type}`,
+              start_time: start.toISOString(),
+              end_time: end.toISOString()
+            }, { headers: { 'X-Clerk-Auth': `Bearer ${token}` } });
+            addedCount++;
+          } catch (e) {
+            console.error("Failed to add task", task.id, e);
+          }
+        }
+      }
+      alert(`Added ${addedCount} tasks to your Google Calendar!`);
+      setIsAddAllModalOpen(false);
+    } catch (e) {
+      console.error(e);
+      alert("Failed to fetch tasks or communicate with calendar API.");
+    } finally {
+      setAddingAllLoading(false);
+    }
+  };
+
   const [initialTodoSessions, setInitialTodoSessions] = useState<Set<string>>(new Set());
 
   const handleAutoOpenTodo = useCallback((sessionId: string) => {
@@ -304,6 +355,13 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
               </SignInButton>
             </SignedOut>
             <SignedIn>
+              <button
+                onClick={() => setIsAddAllModalOpen(true)}
+                className="p-1 min-w-[24px] min-h-[24px] flex items-center justify-center rounded-md bg-[#f4f3ec] hover:bg-[#e5e4e7] dark:bg-[#3f414d] dark:hover:bg-[#4b4e5b] text-[#aa3bff] dark:text-[#c084fc] transition-colors shadow-sm cursor-pointer border border-transparent dark:border-[#2e303a]"
+                title="Add all to Google Calendar"
+              >
+                <CalendarPlus size={14} />
+              </button>
               <UserButton appearance={{ elements: { userButtonAvatarBox: "w-6 h-6" } }} />
             </SignedIn>
           </div>
@@ -375,6 +433,45 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
                 }`}
               >
                 Yes, Clear
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add All To Calendar Modal */}
+      {isAddAllModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#1f2028] border border-[#e5e4e7] dark:border-[#2e303a] rounded-3xl p-8 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-4 mb-6">
+              <div className="w-12 h-12 rounded-2xl bg-[#f4f3ec] dark:bg-[#3f414d] flex items-center justify-center shrink-0">
+                <CalendarPlus size={24} className="text-[#aa3bff] dark:text-[#c084fc]" strokeWidth={2.5} />
+              </div>
+              <h3 className="text-xl font-bold text-[#08060d] dark:text-[#f3f4f6]">
+                Sync All Pending Tasks?
+              </h3>
+            </div>
+            
+            <p className="text-[#6b6375] dark:text-[#9ca3af] mb-8 leading-relaxed">
+              This will fetch all your pending assignments and quizzes and automatically create 2-hour study blocks for them in your personal Google Calendar.
+              <br/><br/>
+              Are you sure you want to proceed?
+            </p>
+
+            <div className="flex items-center gap-3 w-full">
+              <button
+                onClick={() => setIsAddAllModalOpen(false)}
+                disabled={addingAllLoading}
+                className="flex-1 py-3 px-4 bg-[#f4f3ec] hover:bg-[#e5e4e7] dark:bg-[#2e303a] dark:hover:bg-[#3f414d] text-[#08060d] dark:text-[#f3f4f6] rounded-xl font-semibold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddAllToCalendar}
+                disabled={addingAllLoading}
+                className="flex-1 py-3 px-4 flex justify-center items-center gap-2 bg-[#aa3bff] hover:bg-[#902ee6] text-white rounded-xl font-semibold transition-colors shadow-lg cursor-pointer disabled:opacity-50"
+              >
+                {addingAllLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Yes, Add All'}
               </button>
             </div>
           </div>
