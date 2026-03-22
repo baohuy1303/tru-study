@@ -5,6 +5,7 @@ from supabase import AsyncClient
 from routes.brightspace import router as brightspace_router
 from routes.chat import router as chat_router
 from routes.upload import router as upload_router
+from routes.calendar import router as calendar_router
 
 app = FastAPI()
 
@@ -19,6 +20,7 @@ app.add_middleware(
 app.include_router(brightspace_router)
 app.include_router(chat_router)
 app.include_router(upload_router)
+app.include_router(calendar_router)
 
 @app.get("/")
 def read_root():

@@ -3,6 +3,7 @@ import Sidebar from './Sidebar';
 import TasksSidebar from './TasksSidebar';
 import ChatArea from './ChatArea';
 import { PanelRightOpen, PanelRightClose, Trash2, AlertTriangle, Database } from 'lucide-react';
+import { SignInButton, SignedIn, SignedOut, UserButton } from '@clerk/clerk-react';
 import api from '../lib/api';
 
 interface TodoItem {
@@ -293,8 +294,20 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
       {/* Right Sidebar: Tasks & Workload */}
       <aside className={`shrink-0 border-l border-[#e5e4e7] dark:border-[#2e303a] bg-white dark:bg-[#1f2028] flex flex-col h-full shadow-[rgba(0,0,0,0.05)_-2px_0_8px_-2px] transition-all duration-300 ease-in-out z-20 ${tasksOpen ? 'w-96' : 'w-0 overflow-hidden border-none'}`}>
         <div className="p-4 border-b border-[#e5e4e7] dark:border-[#2e303a] shrink-0 flex items-center justify-between">
-          <h2 className="text-lg font-semibold tracking-tight m-0 text-left whitespace-nowrap">Pending Tasks</h2>
-          <button onClick={() => setTasksOpen(false)} className="p-1.5 hover:bg-[#f4f3ec] dark:hover:bg-[#2e303a] rounded-lg transition-colors">
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-semibold tracking-tight m-0 text-left whitespace-nowrap">Pending Tasks</h2>
+            <SignedOut>
+              <SignInButton mode="modal">
+                <button className="text-[11px] font-bold uppercase tracking-widest px-2.5 py-1 bg-[#f4f3ec] hover:bg-[#e5e4e7] dark:bg-[#3f414d] dark:hover:bg-[#4b4e5b] text-[#aa3bff] dark:text-[#c084fc] rounded-md transition-colors cursor-pointer shadow-sm">
+                  Sign In
+                </button>
+              </SignInButton>
+            </SignedOut>
+            <SignedIn>
+              <UserButton appearance={{ elements: { userButtonAvatarBox: "w-6 h-6" } }} />
+            </SignedIn>
+          </div>
+          <button onClick={() => setTasksOpen(false)} className="p-1.5 hover:bg-[#f4f3ec] dark:hover:bg-[#2e303a] rounded-lg transition-colors cursor-pointer">
             <PanelRightClose size={20} className="text-[#6b6375] dark:text-[#9ca3af]" />
           </button>
         </div>

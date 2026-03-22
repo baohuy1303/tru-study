@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Calendar, Clock, ChevronDown, Plus, X, ArrowUp, ArrowDown, Pencil, Check } from 'lucide-react';
+import { Calendar, Clock, ChevronDown, Plus, X, ArrowUp, ArrowDown, Pencil, Check, Loader2 } from 'lucide-react';
+import { useSession } from '@clerk/clerk-react';
 import api from '../lib/api';
 
 interface Task {
@@ -36,6 +37,8 @@ export default function TasksSidebar({ selectedTask, onTaskSelect, todoPlans, on
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
   const [newItemTexts, setNewItemTexts] = useState<Map<string, string>>(new Map());
+  const [addingToCal, setAddingToCal] = useState<string | null>(null);
+  const { session } = useSession();
 
   useEffect(() => {
     async function loadWork() {
@@ -144,6 +147,51 @@ export default function TasksSidebar({ selectedTask, onTaskSelect, todoPlans, on
     onTodosChange?.(sessionId, reordered);
   };
 
+  const handleAddToCalendar = async (e: React.MouseEvent, task: Task, courseName: string) => {
+    e.stopPropagation();
+    if (!session) {
+      alert("Please sign in with Google to add to Calendar.");
+      return;
+    }
+    setAddingToCal(String(task.id));
+    try {
+      const token = await session.getToken();
+      
+      let start = new Date();
+      let end = new Date(start.getTime() + 60 * 60 * 1000);
+      
+      if (task.due_date) {
+        end = new Date(task.due_date);
+        start = new Date(end.getTime() - 60 * 60 * 1000); // 1 hour block ending at due date
+        // If due date is already passed or too close, fallback to starting from now
+        if (start.getTime() < Date.now()) {
+            start = new Date();
+            end = new Date(start.getTime() + 60 * 60 * 1000);
+        }
+      }
+
+      const response = await api.post(
+        '/add-event',
+        {
+          summary: `${courseName}: ${task.name}`,
+          description: `Automatically added from TruStudy.\nTask Type: ${task.type}`,
+          start_time: start.toISOString(),
+          end_time: end.toISOString()
+        },
+        { headers: { 'X-Clerk-Auth': `Bearer ${token}` } }
+      );
+      
+      if (response.data?.status === 'success') {
+         alert("Added to Google Calendar!");
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert(err.response?.data?.detail || "Failed to add event. Make sure you signed in with Calendar permissions.");
+    } finally {
+      setAddingToCal(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="animate-pulse space-y-8 pt-2">
@@ -238,13 +286,28 @@ export default function TasksSidebar({ selectedTask, onTaskSelect, todoPlans, on
                         </div>
                       </div>
 
-                      <div className={`mt-4 pt-4 border-t border-[#f4f3ec] dark:border-[#2e303a] flex items-center text-xs font-bold uppercase tracking-wide ${
-                        overdue ? 'text-red-500 dark:text-red-400' :
-                        soon ? 'text-amber-500 dark:text-amber-400' :
-                        'text-[#6b6375] dark:text-[#9ca3af]'
-                      }`}>
-                        <Clock size={14} className="mr-2 shrink-0" strokeWidth={2.5} />
-                        <span className="truncate">{overdue ? 'OVERDUE — ' : ''}{dateStr}</span>
+                      <div className={`mt-4 pt-4 border-t border-[#f4f3ec] dark:border-[#2e303a] flex items-center justify-between`}>
+                        <div className={`flex items-center text-xs font-bold uppercase tracking-wide ${
+                          overdue ? 'text-red-500 dark:text-red-400' :
+                          soon ? 'text-amber-500 dark:text-amber-400' :
+                          'text-[#6b6375] dark:text-[#9ca3af]'
+                        }`}>
+                          <Clock size={14} className="mr-2 shrink-0" strokeWidth={2.5} />
+                          <span className="truncate">{overdue ? 'OVERDUE — ' : ''}{dateStr}</span>
+                        </div>
+                        
+                        <button
+                          onClick={(e) => handleAddToCalendar(e, task, course.course_name)}
+                          disabled={addingToCal === String(task.id)}
+                          className="flex items-center justify-center p-1.5 rounded bg-[#f4f3ec] hover:bg-[#e5e4e7] dark:bg-[#3f414d] dark:hover:bg-[#4b4e5b] text-[#aa3bff] dark:text-[#c084fc] transition-colors"
+                          title="Add to Google Calendar"
+                        >
+                          {addingToCal === String(task.id) ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Calendar size={14} />
+                          )}
+                        </button>
                       </div>
                     </div>
 

@@ -7,6 +7,7 @@ const api = axios.create({
 // Add a request interceptor to inject the token
 api.interceptors.request.use(
   (config) => {
+    // Always attach the Brightspace userid
     const token = localStorage.getItem('bs_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
