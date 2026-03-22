@@ -18,6 +18,7 @@ _CACHEABLE_FIELDS = [
     "assignment_embedded",
     "material_references",
     "embedded_materials",
+    "task_plan",
 ]
 
 
@@ -69,6 +70,26 @@ def cache_pipeline_state(session_id: str, state: dict) -> None:
             cached[field] = state[field]
     session["cached_state"] = cached
     save_session(session_id, session)
+
+
+def get_task_plan(session_id: str) -> list[dict] | None:
+    """Retrieve the task plan from a session. Returns None if session not found."""
+    session = load_session(session_id)
+    if not session:
+        return None
+    return session.get("cached_state", {}).get("task_plan")
+
+
+def update_task_plan(session_id: str, task_plan: list[dict]) -> bool:
+    """Update the task plan in a session's cached state. Returns True if session exists."""
+    session = load_session(session_id)
+    if not session:
+        return False
+    if "cached_state" not in session:
+        session["cached_state"] = {}
+    session["cached_state"]["task_plan"] = task_plan
+    save_session(session_id, session)
+    return True
 
 
 def delete_session(session_id: str) -> bool:

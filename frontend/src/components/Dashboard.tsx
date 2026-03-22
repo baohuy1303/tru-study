@@ -1,14 +1,25 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Sidebar from './Sidebar';
 import TasksSidebar from './TasksSidebar';
 import ChatArea from './ChatArea';
 import { PanelRightOpen, PanelRightClose, Trash2 } from 'lucide-react';
 import api from '../lib/api';
 
+interface TodoItem {
+  id: string;
+  text: string;
+  completed: boolean;
+  order: number;
+}
+
 export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [selectedTask, setSelectedTask] = useState<any>(null);
   const [tasksOpen, setTasksOpen] = useState(true);
   const [resetKey, setResetKey] = useState(0);
+
+  // Map of session_id -> TodoItem[] for AI-generated to-do lists
+  const [todoPlans, setTodoPlans] = useState<Map<string, TodoItem[]>>(new Map());
+  const patchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Map of topic_id -> { id, title, path?, file_name? }
   const [checkedTopicsMap, setCheckedTopicsMap] = useState<Map<number, any>>(new Map());
@@ -78,6 +89,48 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
 
   const selectedTopicsPayload = Array.from(checkedTopicsMap.values());
 
+  // Receive task plan from pipeline SSE result
+  const handleTaskPlanReceived = useCallback((sessionId: string, plan: TodoItem[]) => {
+    setTodoPlans(prev => {
+      const next = new Map(prev);
+      next.set(sessionId, plan);
+      return next;
+    });
+  }, []);
+
+  // Update todos (optimistic + debounced PATCH)
+  const handleTodosChange = useCallback((sessionId: string, todos: TodoItem[]) => {
+    setTodoPlans(prev => {
+      const next = new Map(prev);
+      next.set(sessionId, todos);
+      return next;
+    });
+    if (patchTimerRef.current) clearTimeout(patchTimerRef.current);
+    patchTimerRef.current = setTimeout(() => {
+      api.patch(`/sessions/${sessionId}/todos`, { todos }).catch(err =>
+        console.error("Failed to update todos", err)
+      );
+    }, 400);
+  }, []);
+
+  // Fetch existing todos when a task is selected
+  useEffect(() => {
+    if (selectedTask?.task_id && selectedTask.type === 'assignment') {
+      const sid = `${selectedTask.org_unit_id}_${selectedTask.task_id}`;
+      if (!todoPlans.has(sid)) {
+        api.get(`/sessions/${sid}/todos`).then(res => {
+          if (res.data.found && res.data.todos?.length > 0) {
+            setTodoPlans(prev => {
+              const next = new Map(prev);
+              next.set(sid, res.data.todos);
+              return next;
+            });
+          }
+        }).catch(() => {});
+      }
+    }
+  }, [selectedTask?.task_id]);
+
   const handleClearAllSessions = async () => {
     try {
       await api.delete('/sessions');
@@ -91,6 +144,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     // Reset all in-memory state
     setSelectedTask(null);
     setCheckedTopicsMap(new Map());
+    setTodoPlans(new Map());
     setTasksOpen(true);
     setResetKey(k => k + 1);
   };
@@ -147,6 +201,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           selectedTopics={selectedTopicsPayload}
           resetKey={resetKey}
           onLinkTopicReplaced={handleLinkTopicReplaced}
+          onTaskPlanReceived={handleTaskPlanReceived}
         />
       </main>
 
@@ -159,7 +214,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           </button>
         </div>
         <div className="flex-1 overflow-y-auto p-4 bg-[#f4f3ec]/40 dark:bg-[#16171d]/40 custom-scrollbar whitespace-nowrap">
-          <TasksSidebar selectedTask={selectedTask} onTaskSelect={handleTaskSelect} />
+          <TasksSidebar selectedTask={selectedTask} onTaskSelect={handleTaskSelect} todoPlans={todoPlans} onTodosChange={handleTodosChange} />
         </div>
       </aside>
 

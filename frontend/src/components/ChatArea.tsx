@@ -25,12 +25,14 @@ export default function ChatArea({
   selectedTopics = [],
   resetKey = 0,
   onLinkTopicReplaced,
+  onTaskPlanReceived,
 }: {
   selectedTask: any,
   onClearTask: () => void,
   selectedTopics?: any[],
   resetKey?: number,
   onLinkTopicReplaced?: (topicId: number, topicTitle: string, uploadData: any) => void,
+  onTaskPlanReceived?: (sessionId: string, plan: any[]) => void,
 }) {
   const [taskDetails, setTaskDetails] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -347,6 +349,9 @@ export default function ChatArea({
                     }
                     if (data.too_long_videos?.length > 0) {
                       setTooLongVideos(data.too_long_videos);
+                    }
+                    if (data.task_plan?.length > 0 && data.session_id) {
+                      onTaskPlanReceived?.(data.session_id, data.task_plan);
                     }
                   }
                 } catch(e) {

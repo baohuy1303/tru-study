@@ -6,7 +6,7 @@ Flow:
   pdf_parser → token_gate (conditional)
     ├── small → small_context_handler → material_extractor
     └── large → large_context_handler → material_extractor
-  material_extractor → material_fetcher → query_rewriter → responder → END
+  material_extractor → task_planner → material_fetcher → query_rewriter → responder → END
 """
 
 import os
@@ -18,6 +18,7 @@ from agents.nodes.pdf_parser import pdf_parser
 from agents.nodes.context_handler import handle_small_context, handle_large_context
 from agents.nodes.material_extractor import material_extractor
 from agents.nodes.material_fetcher import material_fetcher
+from agents.nodes.task_planner import task_planner
 from agents.nodes.query_rewriter import query_rewriter
 from agents.nodes.responder import responder
 
@@ -43,6 +44,7 @@ def build_graph() -> StateGraph:
     graph.add_node("small_context_handler", handle_small_context)
     graph.add_node("large_context_handler", handle_large_context)
     graph.add_node("material_extractor", material_extractor)
+    graph.add_node("task_planner", task_planner)
     graph.add_node("material_fetcher", material_fetcher)
     graph.add_node("query_rewriter", query_rewriter)
     graph.add_node("responder", responder)
@@ -65,7 +67,8 @@ def build_graph() -> StateGraph:
     graph.add_edge("large_context_handler", "material_extractor")
 
     # Linear pipeline from material_extractor to END
-    graph.add_edge("material_extractor", "material_fetcher")
+    graph.add_edge("material_extractor", "task_planner")
+    graph.add_edge("task_planner", "material_fetcher")
     graph.add_edge("material_fetcher", "query_rewriter")
     graph.add_edge("query_rewriter", "responder")
     graph.add_edge("responder", END)

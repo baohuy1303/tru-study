@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from dependencies import get_bs_token
 from agents.graph import build_graph
-from utils.session import build_session_id, load_session, append_turn, cache_pipeline_state, delete_session, delete_all_sessions
+from utils.session import build_session_id, load_session, append_turn, cache_pipeline_state, delete_session, delete_all_sessions, get_task_plan, update_task_plan
 
 router = APIRouter(prefix="/api")
 
@@ -98,6 +98,7 @@ async def chat_stream(body: ChatRequest, token: str = Depends(get_bs_token)):
             "retrieval_queries": last_state.get("retrieval_queries", []),
             "inaccessible_topics": last_state.get("inaccessible_topics", []),
             "too_long_videos": last_state.get("too_long_videos", []),
+            "task_plan": last_state.get("task_plan", []),
             "session_id": session_id,
             "pipeline_log": last_state.get("pipeline_log", [])
         }
@@ -123,3 +124,26 @@ async def clear_session(course_id: int, assignment_id: int):
 async def clear_all_sessions():
     count = delete_all_sessions()
     return {"deleted_count": count}
+
+
+class TodoUpdateRequest(BaseModel):
+    todos: list[dict]
+
+
+@router.get("/sessions/{session_id}/todos")
+async def get_todos(session_id: str, token: str = Depends(get_bs_token)):
+    """Fetch the current to-do list for a session."""
+    plan = get_task_plan(session_id)
+    if plan is None:
+        return {"todos": [], "found": False}
+    return {"todos": plan, "found": True}
+
+
+@router.patch("/sessions/{session_id}/todos")
+async def patch_todos(session_id: str, body: TodoUpdateRequest, token: str = Depends(get_bs_token)):
+    """Update the full to-do list for a session."""
+    from fastapi import HTTPException
+    success = update_task_plan(session_id, body.todos)
+    if not success:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"status": "ok", "count": len(body.todos)}

@@ -50,6 +50,9 @@ class GraphState(TypedDict, total=False):
     # ── Too-long videos ──────────────────────────────────────────────────
     too_long_videos: list[dict]      # [{"id", "title", "duration_estimate_min"}] videos over 10 min
 
+    # ── Task planning ──────────────────────────────────────────────────────
+    task_plan: list[dict]    # [{"id", "text", "completed", "order"}] AI-generated to-do items
+
     # ── Pipeline logging ───────────────────────────────────────────────────
     pipeline_log: list[dict]  # [{"node", "status", "detail", "duration_s"}]
 
