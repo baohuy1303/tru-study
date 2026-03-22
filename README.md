@@ -4,13 +4,13 @@ An AI study assistant built specifically for Truman State University students. T
 
 ---
 
-## Inspiration
+## 💡 Inspiration
 
 We've all used AI for assignments, but the process is broken. You're manually downloading files, watching endless lecture videos just to find the relevant part, copy-pasting into ChatGPT, hitting context limits, and starting over. I built TruStudy because I wanted something me and other Truman students could actually use — something that knows your course, reads your assignments, and finds the right material automatically.
 
 ---
 
-## Why It Matters
+## 🎯 Why It Matters
 
 Most AI study tools are general-purpose — they don't know your professor, your syllabus, or what chapter your exam covers next week. Students end up doing the heavy lifting themselves: finding the right files, manually downloading everything, trimming them down to fit a context window, and hoping the AI doesn't hallucinate a citation that doesn't exist.
 
@@ -18,7 +18,7 @@ TruStudy closes that gap. It knows your course because it reads it directly. Ans
 
 ---
 
-## What It Does
+## ✨ What It Does
 
 - **Brightspace integration** — logs in via Truman CAS SSO and reads your real course content: assignments, instructions, attachments, and the full course material tree
 - **Automatic material discovery** — analyzes your assignment and autonomously fetches the referenced textbook chapters, lecture slides, and lab documents from Brightspace
@@ -31,7 +31,7 @@ TruStudy closes that gap. It knows your course because it reads it directly. Ans
 
 ---
 
-## How I Built It
+## 🏗️ How I Built It
 
 The core is a **LangGraph multi-agent pipeline** — a directed graph of specialized nodes sharing typed state. Each node does one job: extract text, summarize, find material references, fetch and embed them, rewrite queries, retrieve and respond.
 
@@ -43,7 +43,7 @@ See [AI_ARCHITECTURE.md](AI_ARCHITECTURE.md) for the full pipeline diagram and n
 
 ---
 
-## Tech Stack
+## 🛠️ Tech Stack
 
 | Layer | Technologies |
 |---|---|
@@ -57,21 +57,40 @@ See [AI_ARCHITECTURE.md](AI_ARCHITECTURE.md) for the full pipeline diagram and n
 
 ---
 
-## How to Run
+## 🚀 How to Run
 
 **Prerequisites:** Node.js, Python 3.11+, a Truman SSO account, OpenAI API key.
 
 **Backend**
+
+Create `backend/.env`:
+```env
+BS_USER=                          # Truman SSO username
+BS_PASS=                          # Truman SSO password
+OPENAI_API_KEY=                   # Required for LLM, embeddings, Whisper
+SUPABASE_URL=
+SUPABASE_KEY=
+CLERK_SECRET_KEY=                 # For Google Calendar integration
+TOKEN_THRESHOLD=4000
+LLM_MODEL=gpt-4o
+EMBEDDING_MODEL=text-embedding-3-small
+```
+
 ```bash
 cd backend
 python -m venv venv
 source venv/Scripts/activate      # Windows/Git Bash
 pip install -r requirements.txt
-# Create backend/.env with BS_USER, BS_PASS, OPENAI_API_KEY
 uvicorn app:app --reload
 ```
 
 **Frontend**
+
+Create `frontend/.env`:
+```env
+VITE_CLERK_PUBLISHABLE_KEY=       # Clerk publishable key
+```
+
 ```bash
 cd frontend
 npm install
@@ -82,7 +101,7 @@ Open `http://localhost:5173`. Both servers must run simultaneously.
 
 ---
 
-## Challenges
+## 🧱 Challenges
 
 **Brightspace API** — The documentation is sparse and students don't have access to admin-level endpoints (everything under `/orgstructure/` returns 403). I had to reverse-engineer the token interception flow using Playwright and work around the missing endpoints with name-prefix heuristics for course filtering.
 
@@ -96,7 +115,7 @@ Open `http://localhost:5173`. Both servers must run simultaneously.
 
 ---
 
-## Accomplishments
+## 🏆 Accomplishments
 
 The pipeline actually works, and it works well. I handed it to a few friends to test today — they pointed it at their real assignments and it gave them accurate, grounded answers on the first try. Building something that solves a real problem for real users in a hackathon timeframe is satisfying.
 
@@ -104,13 +123,13 @@ Being able to move fast on unfamiliar APIs — reading Brightspace docs, designi
 
 ---
 
-## What I Learned
+## 📚 What I Learned
 
 **Divide and conquer** — breaking the problem into discrete, testable nodes made the complexity manageable. **Observability from day one** — logging and pipeline tracing saved enormous debugging time. **Validate early** — I had multiple API integrations and pipeline stages fail in ways I didn't expect; writing integration tests and checking outputs at each step prevented those failures from compounding. **Resist feature creep** — knowing what to cut and what to keep is the hardest skill when you're building fast.
 
 ---
 
-## What's Next
+## 🔭 What's Next
 
 - Stronger retrieval with better embedding models and larger top-k windows
 - PDF and video previews inline in the chat
