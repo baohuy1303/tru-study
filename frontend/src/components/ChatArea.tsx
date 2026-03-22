@@ -59,6 +59,7 @@ export default function ChatArea({
   const [inaccessibleTopics, setInaccessibleTopics] = useState<any[]>([]);
   const [uploadingForTopic, setUploadingForTopic] = useState<number | null>(null);
   const [tooLongVideos, setTooLongVideos] = useState<any[]>([]);
+  const [isClearModalOpen, setIsClearModalOpen] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -185,12 +186,12 @@ export default function ChatArea({
     fetchDetails();
   }, [selectedTask?.task_id, selectedTask?.org_unit_id, selectedTask?.type]);
 
-  const handleClearChat = async () => {
+  const confirmClearChat = async () => {
     try {
       if (sessionId) {
         await api.delete(`/sessions/id/${sessionId}`);
       } else if (selectedTask) {
-        await api.delete(`/sessions/0/${selectedTask.task_id}`); // fallback if very old session
+        await api.delete(`/sessions/0/${selectedTask.task_id}`);
       }
       setMessages([]);
       setSessionId(null);
@@ -203,9 +204,14 @@ export default function ChatArea({
         const sid = sessionId || `${selectedTask.org_unit_id}_${selectedTask.task_id}`;
         onClearTodos?.(sid);
       }
+      setIsClearModalOpen(false);
     } catch (e) {
       console.error("Failed to clear backend session", e);
     }
+  };
+
+  const handleClearChat = () => {
+    setIsClearModalOpen(true);
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -948,6 +954,42 @@ export default function ChatArea({
           </div>
         </form>
       </div>
+
+      {/* Local Clear Confirmation Modal */}
+      {isClearModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#1f2028] border border-[#e5e4e7] dark:border-[#2e303a] rounded-3xl p-8 max-w-sm w-full shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-4 mb-6">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 dark:bg-rose-900/30 flex items-center justify-center shrink-0">
+                <Trash2 size={24} className="text-rose-500 dark:text-rose-400" strokeWidth={2.5} />
+              </div>
+              <h3 className="text-xl font-bold text-[#08060d] dark:text-[#f3f4f6]">
+                Clear this Chat?
+              </h3>
+            </div>
+            
+            <p className="text-[#6b6375] dark:text-[#9ca3af] mb-8 leading-relaxed">
+              This will permanently delete the current conversation history. Your course materials and uploaded files will remain.
+            </p>
+
+            <div className="flex items-center gap-3 w-full">
+              <button
+                onClick={() => setIsClearModalOpen(false)}
+                className="flex-1 py-3 px-4 bg-[#f4f3ec] hover:bg-[#e5e4e7] dark:bg-[#2e303a] dark:hover:bg-[#3f414d] text-[#08060d] dark:text-[#f3f4f6] rounded-xl font-semibold transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmClearChat}
+                className="flex-1 py-3 px-4 bg-rose-500 hover:bg-rose-600 text-white rounded-xl font-semibold transition-colors shadow-lg shadow-rose-500/25 cursor-pointer"
+              >
+                Yes, Clear
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

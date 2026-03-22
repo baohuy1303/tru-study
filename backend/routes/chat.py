@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from dependencies import get_bs_token
 from agents.graph import build_graph
-from utils.session import build_session_id, load_session, append_turn, cache_pipeline_state, delete_session, delete_all_sessions, get_task_plan, update_task_plan
+from utils.session import build_session_id, load_session, append_turn, cache_pipeline_state, delete_session, delete_all_sessions, wipe_all_data, wipe_storage_only, get_task_plan, update_task_plan
 
 router = APIRouter(prefix="/api")
 
@@ -124,6 +124,18 @@ async def clear_session(course_id: int, assignment_id: int):
 async def clear_all_sessions():
     count = delete_all_sessions()
     return {"deleted_count": count}
+
+@router.delete("/data")
+async def clear_all_data():
+    """Wipe EVERYTHING (chats + storage)."""
+    success = wipe_all_data()
+    return {"status": "ok", "wiped": success}
+
+@router.delete("/storage")
+async def clear_only_storage():
+    """Wipe only heavy storage (uploads + embeddings + manifests)."""
+    success = wipe_storage_only()
+    return {"status": "ok", "wiped": success}
 
 
 class TodoUpdateRequest(BaseModel):

@@ -114,3 +114,34 @@ def delete_all_sessions() -> int:
             except OSError:
                 pass
     return count
+
+
+def wipe_storage_only() -> bool:
+    """Wipe heavy storage including uploads, manifests, and chroma."""
+    import shutil
+    base_dir = os.path.join(os.path.dirname(__file__), "..", "storage")
+    dirs = ["uploads", "manifests", "chroma"]
+    success = True
+    for d in dirs:
+        p = os.path.join(base_dir, d)
+        if os.path.exists(p):
+            try:
+                shutil.rmtree(p)
+            except Exception as e:
+                print(f"Failed to wipe {d}: {e}")
+                success = False
+    return success
+
+
+def wipe_all_data() -> bool:
+    """Wipe all storage data including sessions, uploads, cache, and chroma embeddings."""
+    import shutil
+    storage_dir = os.path.join(os.path.dirname(__file__), "..", "storage")
+    if os.path.exists(storage_dir):
+        try:
+            shutil.rmtree(storage_dir)
+            return True
+        except Exception as e:
+            print(f"Failed to wipe storage: {e}")
+            return False
+    return True

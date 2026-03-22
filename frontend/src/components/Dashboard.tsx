@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import Sidebar from './Sidebar';
 import TasksSidebar from './TasksSidebar';
 import ChatArea from './ChatArea';
-import { PanelRightOpen, PanelRightClose, Trash2 } from 'lucide-react';
+import { PanelRightOpen, PanelRightClose, Trash2, AlertTriangle, Database } from 'lucide-react';
 import api from '../lib/api';
 
 interface TodoItem {
@@ -16,6 +16,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [selectedTask, setSelectedTask] = useState<any>(null);
   const [tasksOpen, setTasksOpen] = useState(true);
   const [resetKey, setResetKey] = useState(0);
+  const [clearDataModal, setClearDataModal] = useState<'none' | 'chats' | 'storage'>('none');
 
   // Map of session_id -> TodoItem[] for AI-generated to-do lists
   const [todoPlans, setTodoPlans] = useState<Map<string, TodoItem[]>>(new Map());
@@ -166,15 +167,34 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     Object.keys(localStorage)
       .filter(k => k.startsWith('chat_'))
       .forEach(k => localStorage.removeItem(k));
+    
+    setMessagesToClear();
+    setClearDataModal('none');
+  };
+
+  const handleClearAllStorage = async () => {
+    try {
+      await api.delete('/storage');
+    } catch (err) {
+      console.error("Failed to clear storage", err);
+    }
+    // Clear localStorage for uploads and link replacements
     Object.keys(localStorage)
-      .filter(k => k.startsWith('assignment_upload_'))
+      .filter(k => k.startsWith('assignment_upload_') || k.startsWith('link_topic_'))
       .forEach(k => localStorage.removeItem(k));
 
-    // Reset all in-memory state
+    // Also remove any in-memory upload mappings
+    setAssignmentUploadsMap(new Map());
+    setReplacedLinksMap(new Map());
+    setClearDataModal('none');
+    // Force a reset key change to refresh UI
+    setResetKey(k => k + 1);
+  };
+
+  const setMessagesToClear = () => {
     setSelectedTask(null);
     setCheckedTopicsMap(new Map());
     setTodoPlans(new Map());
-    setAssignmentUploadsMap(new Map());
     setInitialTodoSessions(new Set());
     setTasksOpen(true);
     setResetKey(k => k + 1);
@@ -212,11 +232,18 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           <h1 className="text-xl font-bold tracking-tight text-[#aa3bff] dark:text-[#c084fc] m-0">TruStudy</h1>
           <div className="flex items-center gap-2">
             <button
-              onClick={handleClearAllSessions}
+              onClick={() => setClearDataModal('chats')}
               className="p-1.5 hover:bg-rose-100 dark:hover:bg-rose-900/30 text-[#6b6375] hover:text-rose-500 dark:text-[#9ca3af] dark:hover:text-rose-400 rounded-lg transition-colors cursor-pointer"
               title="Clear all chat sessions"
             >
               <Trash2 size={16} strokeWidth={2.5} />
+            </button>
+            <button
+              onClick={() => setClearDataModal('storage')}
+              className="p-1.5 hover:bg-amber-100 dark:hover:bg-amber-900/30 text-[#6b6375] hover:text-amber-600 dark:text-[#9ca3af] dark:hover:text-amber-400 rounded-lg transition-colors cursor-pointer"
+              title="Wipe heavy storage (uploads, embeddings)"
+            >
+              <Database size={16} strokeWidth={2.5} />
             </button>
             <button onClick={onLogout} className="text-sm font-medium text-[#6b6375] dark:text-[#9ca3af] hover:text-[#08060d] dark:hover:text-white transition-colors cursor-pointer text-right">
               Logout
@@ -281,6 +308,65 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           />
         </div>
       </aside>
+
+      {/* Confirmation Modals */}
+      {clearDataModal !== 'none' && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#1f2028] border border-[#e5e4e7] dark:border-[#2e303a] rounded-3xl p-8 max-w-md w-full shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-4 mb-6">
+              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
+                clearDataModal === 'chats' ? 'bg-rose-100 dark:bg-rose-900/30' : 'bg-amber-100 dark:bg-amber-900/30'
+              }`}>
+                <AlertTriangle size={24} className={clearDataModal === 'chats' ? 'text-rose-500 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400'} strokeWidth={2.5} />
+              </div>
+              <h3 className="text-xl font-bold text-[#08060d] dark:text-[#f3f4f6]">
+                {clearDataModal === 'chats' ? 'Clear All History?' : 'Wipe Heavy Storage?'}
+              </h3>
+            </div>
+            
+            <p className="text-[#6b6375] dark:text-[#9ca3af] mb-8 leading-relaxed">
+              {clearDataModal === 'chats' ? (
+                <>
+                  This will permanently delete <strong className="text-rose-500">all chat sessions</strong> and session memory. 
+                  Your uploaded files and processed course materials will be kept under your account.
+                </>
+              ) : (
+                <>
+                  This will wipe all <strong className="text-amber-600">heavy storage items</strong> including:
+                  <ul className="list-disc pl-5 mt-2 space-y-1">
+                    <li>Uploaded assignment PDFs and documents</li>
+                    <li>Processed course materials (manifests)</li>
+                    <li>Vector search embeddings (ChromaDB)</li>
+                  </ul>
+                  <br/>
+                  Your chat history will be preserved, but AI context may need to be re-processed on next use.
+                </>
+              )}
+              <br/><br/>
+              Are you sure you want to proceed?
+            </p>
+
+            <div className="flex items-center gap-3 w-full">
+              <button
+                onClick={() => setClearDataModal('none')}
+                className="flex-1 py-3 px-4 bg-[#f4f3ec] hover:bg-[#e5e4e7] dark:bg-[#2e303a] dark:hover:bg-[#3f414d] text-[#08060d] dark:text-[#f3f4f6] rounded-xl font-semibold transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={clearDataModal === 'chats' ? handleClearAllSessions : handleClearAllStorage}
+                className={`flex-1 py-3 px-4 text-white rounded-xl font-semibold transition-colors shadow-lg cursor-pointer ${
+                  clearDataModal === 'chats' 
+                    ? 'bg-rose-500 hover:bg-rose-600 shadow-rose-500/25' 
+                    : 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/25'
+                }`}
+              >
+                Yes, Clear
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
