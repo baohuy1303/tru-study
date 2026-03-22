@@ -3,6 +3,8 @@ import api from '../lib/api';
 import { FileText, Link as LinkIcon, Download, Clock, X, Terminal, Loader2, Send, Trash2, Paperclip, Pin, AlertTriangle, ExternalLink, Video, GraduationCap, Zap, Brain } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -584,8 +586,43 @@ export default function ChatArea({
                 {msg.role === 'user' ? (
                   <div className="whitespace-pre-wrap text-[15px] leading-[1.6] break-words">{msg.content}</div>
                 ) : (
-                  <div className="prose dark:prose-invert max-w-none text-[#08060d] dark:text-[#f3f4f6] prose-p:my-1 prose-ul:my-2 break-words overflow-x-hidden text-[15px] leading-[1.6]">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                  <div className="prose dark:prose-invert max-w-none text-[#08060d] dark:text-[#f3f4f6] break-words overflow-x-hidden text-[15px] leading-[1.6]">
+                    <ReactMarkdown 
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        code({ node, inline, className, children, ...props }: any) {
+                          const match = /language-(\w+)/.exec(className || '');
+                          return !inline && match ? (
+                            <div className="rounded-xl overflow-hidden my-4 border border-[#e5e4e7] dark:border-[#3f414d] shadow-sm relative group">
+                              <div className="flex items-center justify-between px-4 py-1.5 bg-[#f4f3ec] dark:bg-[#2e303a] border-b border-[#e5e4e7] dark:border-[#3f414d]">
+                                <span className="text-[11px] font-bold text-[#6b6375] dark:text-[#9ca3af] uppercase tracking-wider">{match[1]}</span>
+                                <button
+                                  onClick={() => navigator.clipboard.writeText(String(children).replace(/\n$/, ''))}
+                                  className="text-[10px] font-bold text-[#6b6375] dark:text-[#9ca3af] hover:text-[#aa3bff] transition-colors bg-white dark:bg-[#1f2028] px-2 py-0.5 rounded shadow-sm border border-[#e5e4e7] dark:border-[#3f414d] cursor-pointer"
+                                >
+                                  COPY
+                                </button>
+                              </div>
+                              <SyntaxHighlighter
+                                style={vscDarkPlus as any}
+                                language={match[1]}
+                                PreTag="div"
+                                customStyle={{ margin: 0, padding: '1.25rem', background: '#1e1e1e', fontSize: '14px', lineHeight: '1.5' }}
+                                {...props}
+                              >
+                                {String(children).replace(/\n$/, '')}
+                              </SyntaxHighlighter>
+                            </div>
+                          ) : (
+                            <code className="bg-[#f4f3ec] dark:bg-[#2e303a] px-1.5 py-0.5 rounded-md text-[#aa3bff] dark:text-[#c084fc] font-mono text-[0.9em]" {...props}>
+                              {children}
+                            </code>
+                          );
+                        }
+                      }}
+                    >
+                      {msg.content}
+                    </ReactMarkdown>
                   </div>
                 )}
               </div>
@@ -710,7 +747,7 @@ export default function ChatArea({
               isTyping ? "Wait for response..." :
               selectedTask ? "Ask a question about this assignment..." : "Ask anything about your uploaded files or selected materials..."
             }
-            className="w-full px-6 pt-5 pb-2 rounded-[1.5rem] bg-transparent text-[#08060d] dark:text-[#f3f4f6] focus:outline-none text-[16px] border-none resize-none overflow-hidden max-h-[300px]"
+            className="w-full px-6 pt-5 pb-2 rounded-[1.5rem] bg-transparent text-[#08060d] dark:text-[#f3f4f6] focus:outline-none text-[16px] border-none resize-none overflow-y-auto custom-scrollbar max-h-[300px]"
           />
 
           <div className="flex items-center justify-between px-4 pb-4 pt-1 gap-3">
