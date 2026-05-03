@@ -1,5 +1,5 @@
-# TruStudy
-
+# 📚 TruStudy
+## Boeing x TruHacks 2026 Winner - Made in 48 hours
 ![TruStudy Screenshot 1](./screenshots/TruStudySS1.png)
 ![TruStudy Screenshot 2](./screenshots/TruStudySS2.png)
 
