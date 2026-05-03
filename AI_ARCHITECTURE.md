@@ -1,4 +1,4 @@
-# TruStudy — Agent Architecture
+# TruStudy - Agent Architecture
 
 TruStudy uses a **LangGraph StateGraph** pipeline to process university assignments and answer student questions with grounded, RAG-backed responses. Every chat message flows through the full pipeline; nodes skip work when results are already cached from a prior turn.
 
@@ -34,7 +34,7 @@ flowchart TD
 
     MF --> QR
 
-    QR["**query_rewriter**\nLLM generates 2–3 semantically\ndiverse retrieval queries from\nprompt + summary + chat history"]
+    QR["**query_rewriter**\nLLM generates 2-3 semantically\ndiverse retrieval queries from\nprompt + summary + chat history"]
 
     QR --> R
 
@@ -59,7 +59,7 @@ flowchart TD
 
 ## Shared State
 
-All nodes read from and write to a single `GraphState` TypedDict. LangGraph merges each node's returned dict into the shared state — nodes only return the keys they modify.
+All nodes read from and write to a single `GraphState` TypedDict. LangGraph merges each node's returned dict into the shared state - nodes only return the keys they modify.
 
 Key state fields:
 
@@ -89,7 +89,7 @@ On the first message for an assignment, the full pipeline runs. Expensive result
 
 On subsequent turns, `pdf_parser` and `context_handler` detect the cached summary and skip extraction and embedding entirely. `material_fetcher` skips re-downloading already-embedded materials (deduped by manifest + ChromaDB metadata).
 
-`uploaded_files` and `supplementary_uploads` are **not** cached — they are re-derived from the request on every turn so uploads are always current.
+`uploaded_files` and `supplementary_uploads` are **not** cached - they are re-derived from the request on every turn so uploads are always current.
 
 ---
 
@@ -101,7 +101,7 @@ On subsequent turns, `pdf_parser` and `context_handler` detect the cached summar
 | `course_materials_{course_id}` | Course files, selected topics, supplementary uploads | `responder` |
 | `course_materials_0` | Freeform uploads (no assignment selected) | `responder` |
 
-> **Gotcha:** `effective_course_id = 0` for freeform mode. All guards must use `is not None` checks — `if course_id:` treats 0 as falsy and silently skips retrieval.
+> **Gotcha:** `effective_course_id = 0` for freeform mode. All guards must use `is not None` checks - `if course_id:` treats 0 as falsy and silently skips retrieval.
 
 ---
 
@@ -111,6 +111,6 @@ The `responder` node switches system prompts based on the `mode` field in the re
 
 | Mode | Behavior |
 |---|---|
-| `learning` | Socratic — asks what the student already knows, nudges rather than answers |
+| `learning` | Socratic - asks what the student already knows, nudges rather than answers |
 | `neutral` (Buddy) | Helpful and conversational, occasionally checks understanding |
 | `lazy` | Gives the answer directly with minimal explanation |
